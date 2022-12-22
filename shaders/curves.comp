@@ -1,0 +1,30 @@
+#version 450
+
+layout(local_size_x = 1, local_size_y = 1) in;
+
+#define cv_type_shape       0
+#define cv_type_contour     1
+#define cv_type_edge_linear 2
+#define cv_type_edge_conic  3
+#define cv_type_edge_cubic  4
+
+#define cv_contour_zero     0
+#define cv_contour_ccw      1
+#define cv_contour_cw       2
+
+struct cv_meta { uint num_points, num_nodes; };
+struct cv_node { uint type_next, data; };
+struct cv_point { vec2 v; };
+struct cv_glyph { uint codepoint, shape; float size, width, height;
+                  float offset_x, offset_y, advance_x, advance_y; };
+struct cv_result { uint count; };
+
+layout(binding = 0) uniform meta  { cv_meta m; };
+layout(binding = 1) buffer points { cv_point p[]; };
+layout(binding = 2) buffer nodes  { cv_node n[]; };
+layout(binding = 5) buffer result { cv_result r; };
+
+void main()
+{
+    r.count = (m.num_points << 16) | m.num_nodes;
+}
