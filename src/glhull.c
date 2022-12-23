@@ -43,6 +43,7 @@ static int opt_help;
 static int opt_glyph;
 static int opt_rotate;
 static int opt_trace;
+static char* opt_imagepath;
 static char* opt_fontpath;
 
 typedef struct hull_state hull_state;
@@ -609,17 +610,12 @@ void errorcb(int error, const char* desc)
     printf("GLFW error %d: %s\n", error, desc);
 }
 
-static int screenshot = 0;
-
 static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
     NVG_NOTUSED(scancode);
     NVG_NOTUSED(mods);
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
-    }
-    if (key == GLFW_KEY_S && action == GLFW_PRESS) {
-        screenshot = 1;
     }
 }
 
@@ -638,6 +634,7 @@ static void print_help(int argc, char **argv)
         "  -g, --glyph <int>                  character code\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
         "  -t, --trace (auto|fwd|rev)         contour trace\n"
+        "  -w, --write-image <pngfile>        write image\n"
         "  -h, --help                         command line help\n",
         argv[0]
     );
@@ -689,6 +686,9 @@ static void parse_options(int argc, char **argv)
                 opt_help++;
             }
             i++;
+        } else if (match_opt(argv[i], "-w", "--write-image")) {
+            opt_imagepath = argv[++i];
+            i++;
         } else {
             cv_error("error: unknown option: %s\n", argv[i]);
             opt_help++;
@@ -707,16 +707,10 @@ static void parse_options(int argc, char **argv)
     }
 }
 
-/*
- * main program
- */
-
-int main(int argc, char **argv)
+void glhull_app(int argc, char **argv)
 {
     GLFWwindow* window;
     hull_state state;
-
-    parse_options(argc, argv);
 
     if (!glfwInit()) {
         cv_panic("glfwInit failed\n");
@@ -724,10 +718,15 @@ int main(int argc, char **argv)
 
     glfwSetErrorCallback(errorcb);
 
+    if (opt_imagepath) {
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+    } else {
+        glfwWindowHint(GLFW_SCALE_TO_MONITOR , GL_TRUE);
+    }
+
     glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
-    glfwWindowHint(GLFW_SCALE_TO_MONITOR , GL_TRUE);
 
     state.window = window = glfwCreateWindow(600, 600, "glhull", NULL, NULL);
     if (!window) {
@@ -768,9 +767,9 @@ int main(int argc, char **argv)
         hull_render(&state, mx, my, winWidth,winHeight, t);
         nvgEndFrame(state.vg);
 
-        if (screenshot) {
-            screenshot = 0;
-            save_screenshot(fbWidth, fbHeight, "glhull.png");
+        if (opt_imagepath) {
+            save_screenshot(fbWidth, fbHeight, opt_imagepath);
+            exit(0);
         }
 
         glfwSwapBuffers(window);
@@ -779,6 +778,15 @@ int main(int argc, char **argv)
 
     hull_state_destroy(&state);
     glfwTerminate();
+}
 
+/*
+ * main program
+ */
+
+int main(int argc, char **argv)
+{
+    parse_options(argc, argv);
+    glhull_app(argc, argv);
     return 0;
 }

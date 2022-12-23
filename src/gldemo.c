@@ -27,9 +27,6 @@
 #include "nanovg_gl_utils.h"
 #include "nanovg_perf.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-
 #include "linmath.h"
 #include "gl2_util.h"
 #include "cv_model.h"
@@ -254,49 +251,10 @@ void hull_render(hull_state* state, float mx, float my, float w, float h, float 
     cv_ll = cv_ll_info;
 }
 
-static void image_set_alpha(uchar* image, int w, int h, int stride, uchar a)
-{
-    int x, y;
-    for (y = 0; y < h; y++) {
-        uchar* row = &image[y*stride];
-        for (x = 0; x < w; x++)
-            row[x*4+3] = a;
-    }
-}
-
-static void image_flip_horiz(uchar* image, int w, int h, int stride)
-{
-    int i = 0, j = h-1, k;
-    while (i < j) {
-        uchar* ri = &image[i * stride];
-        uchar* rj = &image[j * stride];
-        for (k = 0; k < w*4; k++) {
-            uchar t = ri[k];
-            ri[k] = rj[k];
-            rj[k] = t;
-        }
-        i++;
-        j--;
-    }
-}
-
-void save_screenshot(int w, int h, const char* name)
-{
-    uchar* image = (uchar*)malloc(w*h*4);
-    if (image == NULL) return;
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, image);
-    image_set_alpha(image, w, h, w*4, 255);
-    image_flip_horiz(image, w, h, w*4);
-    stbi_write_png(name, w, h, 4, image, w*4);
-    free(image);
-}
-
 void errorcb(int error, const char* desc)
 {
     printf("GLFW error %d: %s\n", error, desc);
 }
-
-static int screenshot = 0;
 
 static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
@@ -304,9 +262,6 @@ static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
     NVG_NOTUSED(mods);
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
-    }
-    if (key == GLFW_KEY_S && action == GLFW_PRESS) {
-        screenshot = 1;
     }
 }
 
@@ -375,11 +330,6 @@ int main()
         hull_render(&state, mx, my, winWidth,winHeight, t);
         renderGraph(state.vg, 5,5, &fps);
         nvgEndFrame(state.vg);
-
-        if (screenshot) {
-            screenshot = 0;
-            save_screenshot(fbWidth, fbHeight, "gldemo.png");
-        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
