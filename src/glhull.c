@@ -43,6 +43,7 @@ static int opt_help;
 static int opt_glyph;
 static int opt_rotate;
 static int opt_trace;
+static int opt_count;
 static char* opt_imagepath;
 static char* opt_fontpath;
 
@@ -60,6 +61,38 @@ struct hull_state
     int fontNormal;
     int fontBold;
 };
+
+
+static int max_edges = 0;
+static int edge_count = 0;
+
+static int hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth, void *userdata)
+{
+    cv_node *node = cv_node_array_item(ctx, idx);
+    uint type = cv_node_type(node);
+    switch (type) {
+    case cv_type_2d_shape:
+        break;
+    case cv_type_2d_contour:
+        max_edges = cv_max(max_edges, edge_count);
+        edge_count = 0;
+        break;
+    case cv_type_2d_edge_linear:
+    case cv_type_2d_edge_conic:
+    case cv_type_2d_edge_cubic:
+        edge_count++;
+        break;
+    }
+    return 1;
+}
+
+static uint hull_max_edges(cv_manifold *ctx)
+{
+    uint end = array_buffer_count(&ctx->nodes);
+    cv_traverse_nodes(ctx, 0, end, 0, 0, hull_count_edges);
+    max_edges = cv_max(max_edges, edge_count);
+    return max_edges;
+}
 
 void hull_state_init(hull_state* state)
 {
@@ -632,6 +665,7 @@ static void print_help(int argc, char **argv)
         "  -l, (info|debug|trace)             debug level\n"
         "  -f, --font <ttf>                   font file\n"
         "  -g, --glyph <int>                  character code\n"
+        "  -c, --count                        count edges\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
         "  -t, --trace (auto|fwd|rev)         contour trace\n"
         "  -w, --write-image <pngfile>        write image\n"
@@ -669,6 +703,9 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-g", "--glyph")) {
             opt_glyph = atoi(argv[++i]);
+            i++;
+        } else if (match_opt(argv[i], "-c", "--count")) {
+            opt_count = 1;
             i++;
         } else if (match_opt(argv[i], "-r", "--rotate")) {
             opt_rotate = atoi(argv[++i]);
@@ -711,6 +748,17 @@ void glhull_app(int argc, char **argv)
 {
     GLFWwindow* window;
     hull_state state;
+
+    if (opt_count) {
+        cv_manifold *mb = (cv_manifold*)calloc(1, sizeof(cv_manifold));
+        cv_manifold_init(mb);
+        cv_load_face(mb, opt_fontpath);
+        cv_load_one_glyph(mb, 12, 100, opt_glyph);
+        cv_dump_graph(mb);
+        printf("%d\n", hull_max_edges(mb));
+        cv_manifold_destroy(mb);
+        exit(0);
+    }
 
     if (!glfwInit()) {
         cv_panic("glfwInit failed\n");

@@ -46,8 +46,8 @@ struct cv_glyph { uint codepoint, shape; float size, width, height;
  * simple math
  */
 
-#define float_min(a,b) (((a)<(b))?(a):(b))
-#define float_max(a,b) (((a)>(b))?(a):(b))
+#define cv_min(a,b) (((a)<(b))?(a):(b))
+#define cv_max(a,b) (((a)>(b))?(a):(b))
 
 static float vec2f_length(vec2f v)
 {
@@ -256,10 +256,10 @@ static uint cv_new_node(cv_manifold *ctx, int type, int offset)
         pc = cv_point_count(type);
         for(size_t i = 0; i < pc; i++) {
             p = cv_point_array_item(ctx, offset + i);
-            ctx->contour_min.x = float_min(ctx->contour_min.x, p->v.x);
-            ctx->contour_min.y = float_min(ctx->contour_min.y, p->v.y);
-            ctx->contour_max.x = float_max(ctx->contour_max.x, p->v.x);
-            ctx->contour_max.y = float_max(ctx->contour_max.y, p->v.y);
+            ctx->contour_min.x = cv_min(ctx->contour_min.x, p->v.x);
+            ctx->contour_min.y = cv_min(ctx->contour_min.y, p->v.y);
+            ctx->contour_max.x = cv_max(ctx->contour_max.x, p->v.x);
+            ctx->contour_max.y = cv_max(ctx->contour_max.y, p->v.y);
             if (i == 0) p1 = p;
             if (i == pc-1) p2 = p;
         }
@@ -287,10 +287,10 @@ static void cv_finalize_contour(cv_manifold *ctx, int contour)
 
     /* accumulate shape min and max */
     ctx->shape_area += ctx->contour_area;
-    ctx->shape_min.x = float_min(ctx->shape_min.x, ctx->contour_min.x);
-    ctx->shape_min.y = float_min(ctx->shape_min.y, ctx->contour_min.y);
-    ctx->shape_max.x = float_max(ctx->shape_max.x, ctx->contour_max.x);
-    ctx->shape_max.y = float_max(ctx->shape_max.y, ctx->contour_max.y);
+    ctx->shape_min.x = cv_min(ctx->shape_min.x, ctx->contour_min.x);
+    ctx->shape_min.y = cv_min(ctx->shape_min.y, ctx->contour_min.y);
+    ctx->shape_max.x = cv_max(ctx->shape_max.x, ctx->contour_max.x);
+    ctx->shape_max.y = cv_max(ctx->shape_max.y, ctx->contour_max.y);
 }
 
 static void cv_finalize_shape(cv_manifold *ctx, int shape)
