@@ -38,7 +38,6 @@ static const char* curves_shader_glsl = "shaders/curves.comp";
 typedef unsigned char uchar;
 
 typedef struct hull_state hull_state;
-
 struct hull_state
 {
     GLFWwindow* window;
@@ -50,10 +49,14 @@ struct hull_state
     uint point;
     int fontNormal;
     int fontBold;
+    FT_Library ftlib;
+    FT_Face ftface;
 };
 
 void hull_state_init(hull_state* state)
 {
+    FT_Error fterr;
+
     state->vg = nvgCreateGLES3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
     if (!state->vg) {
         cv_panic("hull_state_init: error initializing nanovg\n");
@@ -64,8 +67,10 @@ void hull_state_init(hull_state* state)
 
     state->mb = (cv_manifold*)calloc(1, sizeof(cv_manifold));
     cv_manifold_init(state->mb);
-    cv_load_face(state->mb, dejavu_bold_fontpath);
-    state->glyph = cv_load_one_glyph(state->mb, 12, 100, 66);
+
+    state->ftlib = cv_init_ftlib();
+    state->ftface = cv_load_ftface(state->ftlib, dejavu_bold_fontpath);
+    state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, 66);
     cv_dump_graph(state->mb);
 }
 
@@ -267,10 +272,13 @@ static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
 
 int main()
 {
-    GLFWwindow* window;
     hull_state state;
+    GLFWwindow* window;
     PerfGraph fps;
     double prevt = 0;
+
+    memset(&state, 0, sizeof(state));
+    hull_state_init(&state);
 
     if (!glfwInit()) {
         cv_panic("glfwInit failed\n");
@@ -303,7 +311,6 @@ int main()
     glDisable(GL_DEPTH_TEST);
     glClearColor(0.3f, 0.3f, 0.32f, 1.0f);
 
-    hull_state_init(&state);
     prevt = glfwGetTime();
 
     while (!glfwWindowShouldClose(window))

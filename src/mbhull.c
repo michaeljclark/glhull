@@ -35,6 +35,7 @@ static int opt_rotate = 0;
 static int opt_trace = 0;
 static int opt_gpu = 0;
 static char* opt_fontpath;
+static char* opt_textpath;
 
 /*
  * manifold gpu structure
@@ -44,6 +45,20 @@ typedef struct cv_buffer cv_buffer;
 typedef struct cv_result cv_result;
 struct cv_result { uint count; };
 struct cv_buffer { void *data; size_t len; };
+
+typedef struct hull_state hull_state;
+struct hull_state
+{
+    cv_manifold* mb;
+    uint glyph;
+    uint shape;
+    uint contour;
+    uint point;
+    int fontNormal;
+    int fontBold;
+    FT_Library ftlib;
+    FT_Face ftface;
+};
 
 typedef struct cv_manifold_gpu cv_manifold_gpu;
 struct cv_manifold_gpu
@@ -107,6 +122,34 @@ void cv_test_gpu(cv_manifold_gpu *mbo)
     printf("\ntest_gpu: result=0x%x\n", mbo->result.count);
 }
 
+
+static void hull_graph_init(hull_state* state)
+{
+    FT_Error fterr;
+
+    state->mb = (cv_manifold*)calloc(1, sizeof(cv_manifold));
+    cv_manifold_init(state->mb);
+
+    if (opt_fontpath) {
+        state->ftlib = cv_init_ftlib();
+        state->ftface = cv_load_ftface(state->ftlib, opt_fontpath);
+        state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+    } else if (opt_textpath) {
+        state->glyph = cv_load_glyph_text_file(state->mb, opt_textpath);
+    }
+
+    if (opt_rotate > 0) {
+        cv_hull_rotate(state->mb, state->glyph, opt_rotate);
+    }
+}
+
+void hull_graph_destroy(hull_state* state)
+{
+    cv_manifold_destroy(state->mb);
+    free(state->mb);
+}
+
+
 /*
  * option processing
  */
@@ -119,6 +162,7 @@ static void print_help(int argc, char **argv)
         "Options:\n"
         "  -l, (info|debug|trace)             debug level\n"
         "  -f, --font <ttf>                   font file\n"
+        "  -i, --text <contour>               text file\n"
         "  -g, --glyph <int>                  character code\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
         "  -t, --trace (auto|fwd|rev)         contour trace\n"
@@ -158,6 +202,9 @@ static void parse_options(int argc, char **argv)
         } else if (match_opt(argv[i], "-f", "--font")) {
             opt_fontpath = argv[++i];
             i++;
+        } else if (match_opt(argv[i], "-i", "--text")) {
+            opt_textpath = argv[++i];
+            i++;
         } else if (match_opt(argv[i], "-g", "--glyph")) {
             opt_glyph = atoi(argv[++i]);
             i++;
@@ -196,8 +243,8 @@ static void parse_options(int argc, char **argv)
         }
     }
 
-    if (!opt_fontpath) {
-        cv_error("error: --font option missing\n");
+    if (!opt_fontpath && !opt_textpath) {
+        cv_error("error: --font or --text option missing\n");
         opt_help++;
     }
 
@@ -214,8 +261,10 @@ static void parse_options(int argc, char **argv)
 static void glcurves(int argc, char **argv)
 {
     GLFWwindow* window;
+    hull_state state;
 
-    parse_options(argc, argv);
+    memset(&state, 0, sizeof(state));
+    hull_graph_init(&state);
 
     glfwInit();
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
@@ -224,37 +273,26 @@ static void glcurves(int argc, char **argv)
     glfwMakeContextCurrent(window);
     gladLoadGL();
 
-    cv_manifold src;
-    cv_manifold_init(&src);
-    cv_load_face(&src, opt_fontpath);
-
-    uint glyph = cv_load_one_glyph(&src, 96, 100, opt_glyph);
-    cv_glyph *g = cv_glyph_array_item(&src, glyph);
-
-    if (opt_rotate > 0) {
-        cv_hull_rotate(&src, g->shape, opt_rotate);
-    }
     if ((opt_dump & opt_dump_metrics) > 0) {
+        cv_dump_metrics(state.mb, state.glyph);
         puts("");
-        cv_dump_metrics(&src, glyph);
     }
     if ((opt_dump & opt_dump_stats) > 0) {
+        cv_dump_stats(state.mb);
         puts("");
-        cv_dump_stats(&src);
     }
     if ((opt_dump & opt_dump_graph) > 0) {
-        puts("");
-        cv_dump_graph(&src);
-    }
-    if (opt_trace > 0) {
-        puts("");
-        cv_manifold dst;
-        cv_manifold_init(&dst);
-        cv_hull_transform(&src, &dst, g->shape, opt_trace);
+        cv_dump_graph(state.mb);
         puts("");
     }
+
+    cv_manifold dst;
+    cv_manifold_init(&dst);
+    cv_glyph *glyph = cv_glyph_array_item(state.mb, state.glyph);
+    cv_hull_transform(state.mb, &dst, glyph->shape, opt_trace);
+
     if (opt_gpu > 0) {
-        cv_manifold_gpu mbo = { &src };
+        cv_manifold_gpu mbo = { state.mb };
         cv_init_gpu(&mbo);
         cv_test_gpu(&mbo);
     }
@@ -264,6 +302,8 @@ static void glcurves(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+    cv_ll = cv_ll_debug;
+    parse_options(argc, argv);
     glcurves(argc, argv);
     exit(0);
 }

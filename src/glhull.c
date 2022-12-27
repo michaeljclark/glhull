@@ -46,22 +46,23 @@ static int opt_trace;
 static int opt_count;
 static char* opt_imagepath;
 static char* opt_fontpath;
+static char* opt_textpath;
 
 typedef struct hull_state hull_state;
-
 struct hull_state
 {
     GLFWwindow* window;
     NVGcontext* vg;
     cv_manifold* mb;
     uint glyph;
-    uint contour;
     uint shape;
+    uint contour;
     uint point;
     int fontNormal;
     int fontBold;
+    FT_Library ftlib;
+    FT_Face ftface;
 };
-
 
 static int max_edges = 0;
 static int edge_count = 0;
@@ -94,7 +95,7 @@ static uint hull_max_edges(cv_manifold *ctx)
     return max_edges;
 }
 
-void hull_state_init(hull_state* state)
+static void hull_vg_init(hull_state* state)
 {
     state->vg = nvgCreateGLES3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
     if (!state->vg) {
@@ -103,11 +104,22 @@ void hull_state_init(hull_state* state)
 
     state->fontNormal = nvgCreateFont(state->vg, "sans", dejavu_regular_fontpath);
     state->fontBold = nvgCreateFont(state->vg, "sans-bold", dejavu_bold_fontpath);
+}
+
+static void hull_graph_init(hull_state* state)
+{
+    FT_Error fterr;
 
     state->mb = (cv_manifold*)calloc(1, sizeof(cv_manifold));
     cv_manifold_init(state->mb);
-    cv_load_face(state->mb, opt_fontpath);
-    state->glyph = cv_load_one_glyph(state->mb, 12, 100, opt_glyph);
+
+    if (opt_fontpath) {
+        state->ftlib = cv_init_ftlib();
+        state->ftface = cv_load_ftface(state->ftlib, opt_fontpath);
+        state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+    } else if (opt_textpath) {
+        state->glyph = cv_load_glyph_text_file(state->mb, opt_textpath);
+    }
 
     if (opt_rotate > 0) {
         cv_glyph *glyph = cv_glyph_array_item(state->mb, state->glyph);
@@ -117,9 +129,13 @@ void hull_state_init(hull_state* state)
     cv_dump_graph(state->mb);
 }
 
-void hull_state_destroy(hull_state* state)
+void hull_vg_destroy(hull_state* state)
 {
     nvgDeleteGLES3(state->vg);
+}
+
+void hull_graph_destroy(hull_state* state)
+{
     cv_manifold_destroy(state->mb);
     free(state->mb);
 }
@@ -545,7 +561,7 @@ static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
     cv_manifold *mb = state->mb;
     while (idx < end) {
         cv_node *node = cv_node_array_item(mb, idx);
-        cv_debug("cv_hull_transform_contours: %s_%u\n",
+        cv_trace("cv_hull_transform_contours: %s_%u\n",
             cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
         hull_convex_transform_contour(state, o, s, idx, end, opts);
@@ -560,7 +576,7 @@ static int hull_convex_transform_shapes(hull_state* state, vec2f o, float s,
     cv_manifold *mb = state->mb;
     while (idx < end) {
         cv_node *node = cv_node_array_item(mb, idx);
-        cv_debug("cv_hull_transform_shapes: %s_%u\n",
+        cv_trace("cv_hull_transform_shapes: %s_%u\n",
             cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
         uint contour_idx = idx + 1, contour_end = next ? next : end;
@@ -664,6 +680,7 @@ static void print_help(int argc, char **argv)
         "Options:\n"
         "  -l, (info|debug|trace)             debug level\n"
         "  -f, --font <ttf>                   font file\n"
+        "  -i, --text <contour>               text file\n"
         "  -g, --glyph <int>                  character code\n"
         "  -c, --count                        count edges\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
@@ -701,6 +718,9 @@ static void parse_options(int argc, char **argv)
         } else if (match_opt(argv[i], "-f", "--font")) {
             opt_fontpath = argv[++i];
             i++;
+        } else if (match_opt(argv[i], "-i", "--text")) {
+            opt_textpath = argv[++i];
+            i++;
         } else if (match_opt(argv[i], "-g", "--glyph")) {
             opt_glyph = atoi(argv[++i]);
             i++;
@@ -733,8 +753,8 @@ static void parse_options(int argc, char **argv)
         }
     }
 
-    if (!opt_fontpath) {
-        cv_error("error: --font option missing\n");
+    if (!opt_fontpath && !opt_textpath) {
+        cv_error("error: --font or --text option missing\n");
         opt_help++;
     }
 
@@ -749,14 +769,13 @@ void glhull_app(int argc, char **argv)
     GLFWwindow* window;
     hull_state state;
 
+    memset(&state, 0, sizeof(state));
+    hull_graph_init(&state);
+
     if (opt_count) {
-        cv_manifold *mb = (cv_manifold*)calloc(1, sizeof(cv_manifold));
-        cv_manifold_init(mb);
-        cv_load_face(mb, opt_fontpath);
-        cv_load_one_glyph(mb, 12, 100, opt_glyph);
-        cv_dump_graph(mb);
-        printf("%d\n", hull_max_edges(mb));
-        cv_manifold_destroy(mb);
+        cv_dump_graph(state.mb);
+        printf("%d\n", hull_max_edges(state.mb));
+        hull_graph_destroy(&state);
         exit(0);
     }
 
@@ -794,7 +813,7 @@ void glhull_app(int argc, char **argv)
     glDisable(GL_DEPTH_TEST);
     glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
 
-    hull_state_init(&state);
+    hull_vg_init(&state);
 
     while (!glfwWindowShouldClose(window))
     {
@@ -824,7 +843,9 @@ void glhull_app(int argc, char **argv)
         glfwPollEvents();
     }
 
-    hull_state_destroy(&state);
+    hull_vg_destroy(&state);
+    hull_graph_destroy(&state);
+
     glfwTerminate();
 }
 
@@ -834,6 +855,7 @@ void glhull_app(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
+    cv_ll = cv_ll_debug;
     parse_options(argc, argv);
     glhull_app(argc, argv);
     return 0;

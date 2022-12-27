@@ -86,8 +86,6 @@ struct cv_manifold
     array_buffer nodes;
     array_buffer points;
     array_buffer glyphs;
-
-    FT_Face ftface;
 };
 
 static void cv_manifold_init(cv_manifold *ctx)
@@ -483,7 +481,7 @@ static vec2f ft_glyph_bearing(FT_Glyph_Metrics *m)
  * freetype glyph loading
  */
 
-static void cv_load_face(cv_manifold *ctx, const char* fontpath)
+static FT_Library cv_init_ftlib()
 {
     FT_Error fterr;
     FT_Library ftlib;
@@ -491,39 +489,50 @@ static void cv_load_face(cv_manifold *ctx, const char* fontpath)
     if ((fterr = FT_Init_FreeType(&ftlib)))
         cv_panic("error: FT_Init_FreeType failed: fterr=%d\n", fterr);
 
-    if ((fterr = FT_New_Face(ftlib, fontpath, 0, &ctx->ftface)))
+    return ftlib;
+}
+
+static FT_Face cv_load_ftface(FT_Library ftlib, const char* fontpath)
+{
+    FT_Error fterr;
+    FT_Face ftface;
+
+    if ((fterr = FT_New_Face(ftlib, fontpath, 0, &ftface)))
         cv_panic("error: FT_New_Face failed: fterr=%d, path=%s\n",
             fterr, fontpath);
 
-    FT_Select_Charmap(ctx->ftface, FT_ENCODING_UNICODE);
+    FT_Select_Charmap(ftface, FT_ENCODING_UNICODE);
+
+    return ftface;
 }
 
-static uint cv_load_one_glyph(cv_manifold *ctx, float font_size, int dpi, int codepoint)
+static uint cv_load_ftglyph(cv_manifold *ctx, FT_Face ftface,
+    float font_size, int dpi, int codepoint)
 {
     FT_Outline_Funcs ftfuncs = { ft_move_to, ft_line_to, ft_conic_to, ft_cubic_to, 0, 0 };
-    FT_Glyph_Metrics *m = &ctx->ftface->glyph->metrics;
+    FT_Glyph_Metrics *m = &ftface->glyph->metrics;
     FT_Error fterr;
 
     int size = font_size * 64.0f;
-    int glyph_index = FT_Get_Char_Index(ctx->ftface, codepoint);
+    int glyph_index = FT_Get_Char_Index(ftface, codepoint);
 
-    if ((fterr = FT_Set_Char_Size(ctx->ftface, size, size, dpi, dpi)))
+    if ((fterr = FT_Set_Char_Size(ftface, size, size, dpi, dpi)))
         cv_panic("error: FT_Set_Char_Size failed: fterr=%d\n", fterr);
 
-    if ((fterr = FT_Load_Glyph(ctx->ftface, glyph_index, 0)))
+    if ((fterr = FT_Load_Glyph(ftface, glyph_index, 0)))
         cv_panic("error: FT_Load_Glyph failed: fterr=%d\n", fterr);
 
     FT_Matrix  matrix = { 1 * 0x10000L, 0, 0, -1 * 0x10000L };
-    FT_Outline_Transform(&ctx->ftface->glyph->outline, &matrix);
+    FT_Outline_Transform(&ftface->glyph->outline, &matrix);
 
     uint p1 = cv_new_points(ctx, 2); // reserve for minmax
     uint shape = cv_new_node(ctx, cv_type_2d_shape, (uint)p1);
     uint glyph = cv_new_glyph(ctx, codepoint, shape,
         font_size, (float)m->width/64.0f, (float)m->height/64.0f,
         (float)m->horiBearingX/64.0f, (float)m->horiBearingY/64.0f,
-        ctx->ftface->glyph->advance.x/64.0f, ctx->ftface->glyph->advance.y/64.0f);
+        ftface->glyph->advance.x/64.0f, ftface->glyph->advance.y/64.0f);
 
-    if ((fterr = FT_Outline_Decompose(&ctx->ftface->glyph->outline, &ftfuncs, ctx)))
+    if ((fterr = FT_Outline_Decompose(&ftface->glyph->outline, &ftfuncs, ctx)))
         cv_panic("error: FT_Outline_Decompose failed: fterr=%d\n", fterr);
 
     cv_finalize_contour(ctx, ctx->contour);
@@ -532,14 +541,99 @@ static uint cv_load_one_glyph(cv_manifold *ctx, float font_size, int dpi, int co
     return glyph;
 }
 
-static void cv_load_all_glyphs(cv_manifold *ctx, float font_size, int dpi)
+static void cv_load_ftglyph_all(cv_manifold *ctx, FT_Face ftface,
+    float font_size, int dpi)
 {
     FT_UInt idx;
-    FT_ULong charcode = FT_Get_First_Char(ctx->ftface, &idx);
+    FT_ULong charcode = FT_Get_First_Char(ftface, &idx);
     while (idx != 0) {
-        cv_load_one_glyph(ctx, font_size, dpi, charcode);
-        charcode = FT_Get_Next_Char(ctx->ftface, charcode, &idx);
+        cv_load_ftglyph(ctx, ftface, font_size, dpi, charcode);
+        charcode = FT_Get_Next_Char(ftface, charcode, &idx);
     }
+}
+
+static char** cv_split_buffer_items(const char* buffer,
+    size_t buffer_size, size_t* num_items_out, char* sep_chars)
+{
+    size_t n = 0, start = 0;
+    for (size_t i = 0; i < buffer_size; i++) {
+        int is_sep = strchr(sep_chars, buffer[i]) != NULL;
+        if (!is_sep) continue;
+        size_t length = i - start;
+        if (length > 0) n++;
+        start = i + 1;
+    }
+    n += strchr(sep_chars, buffer[buffer_size-1]) == NULL;
+    start = 0;
+    char** items = (char**)calloc(sizeof(char*) * (n + 1) + buffer_size, 1);
+    char* item_buffer = (char*)items + sizeof(char*) * (n + 1);
+    size_t item = 0;
+    for (size_t i = 0; i < buffer_size; i++) {
+        int is_sep = strchr(sep_chars, buffer[i]) != NULL;
+        if (!is_sep) continue;
+        size_t length = i - start;
+        if (length > 0) {
+            memcpy(item_buffer, &buffer[start], length);
+            item_buffer[length] = '\0';
+            items[item++] = item_buffer;
+            item_buffer += length + 1;
+        }
+        start = i + 1;
+    }
+    if (start != buffer_size) {
+        size_t length = buffer_size - start;
+        if (length > 0) {
+            memcpy(item_buffer, &buffer[start], length);
+            item_buffer[length] = '\0';
+            items[item++] = item_buffer;
+            item_buffer += length + 1;
+        }
+    }
+    *num_items_out = n;
+    return items;
+}
+
+static uint cv_load_glyph_text_buffer(cv_manifold *ctx, buffer buf)
+{
+    size_t num_lines = 0;
+    char **lines = cv_split_buffer_items(buf.data, buf.length, &num_lines, "\n");
+    for (size_t i = 0; i < num_lines; i++) {
+        size_t num_tokens = 0;
+        char **tokens = cv_split_buffer_items(lines[i], strlen(lines[i]), &num_tokens, " ");
+        for (size_t j = 0; j < num_tokens; j++) {
+            if (strcmp("begin_shape", tokens[j]) == 0) {
+                uint p1 = cv_new_points(ctx, 2); // reserve for minmax
+                ctx->shape = cv_new_node(ctx, cv_type_2d_shape, (uint)p1);
+            } else if (strcmp("end_shape", tokens[j]) == 0) {
+                cv_finalize_shape(ctx, ctx->shape);
+            } else if (strcmp("begin_contour", tokens[j]) == 0) {
+                uint p1 = cv_new_points(ctx, 2); // reserve for minmax
+                ctx->contour = cv_new_node(ctx, cv_type_2d_contour, (uint)p1);
+            } else if (strcmp("end_contour", tokens[j]) == 0) {
+                cv_finalize_contour(ctx, ctx->contour);
+            } else if (strcmp("move_to", tokens[j]) == 0) {
+                float x = (float)atof(tokens[1]), y = (float)atof(tokens[2]);
+                ctx->point = cv_new_point(ctx, x, y);
+            } else if (strcmp("line_to", tokens[j]) == 0) {
+                float x = (float)atof(tokens[1]), y = (float)atof(tokens[2]);
+                uint p1 = cv_new_point(ctx, x, y);
+                cv_new_node(ctx, cv_type_2d_edge_linear, (uint)ctx->point);
+                ctx->point = p1;
+            }
+        }
+        free(tokens);
+    }
+    free(lines);
+    uint glyph = cv_new_glyph(ctx, 0, ctx->shape, 0, 0, 0, 0, 0, 0, 0);
+    return glyph;
+}
+
+static uint cv_load_glyph_text_file(cv_manifold *ctx, const char* filename)
+{
+    buffer buf = load_file(filename);
+    int glyph = cv_load_glyph_text_buffer(ctx, buf);
+    free(buf.data);
+    return glyph;
 }
 
 static uint cv_dump_metrics(cv_manifold *ctx, uint glyph)
@@ -586,7 +680,7 @@ static int cv_hull_rotate_contours(cv_manifold *ctx, uint idx, uint end, uint of
 {
     while (idx < end) {
         cv_node *node = cv_node_array_item(ctx, idx);
-        cv_debug("cv_hull_rotate_contours: contour=%s_%u offset=%u\n",
+        cv_trace("cv_hull_rotate_contours: %s_%u (offset=%u)\n",
             cv_node_type_name(node), idx, offset);
         uint next = cv_node_next(node);
         cv_hull_rotate_contour(ctx, idx, end, offset);
@@ -599,7 +693,7 @@ static int cv_hull_rotate_shapes(cv_manifold *ctx, uint idx, uint end, uint offs
 {
     while (idx < end) {
         cv_node *node = cv_node_array_item(ctx, idx);
-        cv_debug("cv_hull_rotate_shapes: shape=%s_%u offset=%u\n",
+        cv_trace("cv_hull_rotate_shapes: %s_%u (offset=%u)\n",
             cv_node_type_name(node), idx, offset);
         uint next = cv_node_next(node);
         uint contour_idx = idx + 1, contour_end = next ? next : end;
@@ -858,7 +952,7 @@ static int cv_hull_transform_contours(cv_transform *ctx, uint idx, uint end, uin
 {
     while (idx < end) {
         cv_node *node = cv_node_array_item(ctx->src, idx);
-        cv_debug("cv_hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
+        cv_trace("cv_hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
         cv_hull_transform_contour(ctx, idx, end, opts);
         idx = next ? next : end;
@@ -870,7 +964,7 @@ static int cv_hull_transform_shapes(cv_transform *ctx, uint idx, uint end, uint 
 {
     while (idx < end) {
         cv_node *node = cv_node_array_item(ctx->src, idx);
-        cv_debug("cv_hull_transform_shapes: %s_%u\n", cv_node_type_name(node), idx);
+        cv_trace("cv_hull_transform_shapes: %s_%u\n", cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
         uint contour_idx = idx + 1, contour_end = next ? next : end;
         if (contour_idx < contour_end) {
