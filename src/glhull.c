@@ -287,118 +287,113 @@ static void hull_traverse_nodes(hull_state *state, vec2f o, float s,
     }
 }
 
-static int hull_convex_trace_contour(hull_state* state, vec2f o, float s,
-    uint contour_idx, vec2f *edges, int n_edges, int start, int end, int dir, int w)
+static int hull_convex_trace_contour(hull_state* state,
+    uint contour_idx, vec2f *edges, int n, int s, int i, int e, int dir, int w)
 {
     cv_manifold* mb = state->mb;
 
-    if (cv_ll <= cv_ll_debug)
-    {
-        cv_debug("hull: %-8s %-16s %-6s %-17s %-17s %-17s %-17s %-7s %-7s %-7s\n",
-                 "id", "type", "split", "a(curr)",
-                 "b(next)", "c(close)", "d(first)",
-                 "ab", "bc", "cd");
-        cv_debug("hull: %-8s %-16s %-6s %-17s %-17s %-17s %-17s %-7s %-7s %-7s\n",
-                 "--------", "----------------", "------", "-----------------",
-                 "-----------------", "-----------------", "-----------------",
-                 "-------", "-------", "-------");
+    if (cv_ll <= cv_ll_debug) {
+        cv_hull_edge_debug_header();
     }
 
     /* state variables */
-    float ab_sl = (float)w;
-    int split_at = -1;
+    int split_idx = -1;
     int edge_idx = contour_idx + 1;
-    vec2f p0 = edges[start];
-    vec2f p1 = edges[start + dir];
+
+    int j0 = s % n;
+    int j1 = (s + dir) % n;
+
+    vec2f p0 = edges[j0];
+    vec2f p1 = edges[j1];
+
     vec2f d = (vec2f) { p1.x - p0.x, p1.y - p0.y };
-    int i = start;
 
     /* find convex hull split point where winding order diverges */
-    for (; i != end && split_at == -1; i += dir)
+    for (; i != e && split_idx == -1; i += dir)
     {
-        int i1 = i % n_edges;
-        int i2 = (i + n_edges + dir) % n_edges;
-        int i3 = (i + n_edges + dir + dir) % n_edges;
+        int i1 = (i + n - dir) % n;
+        int i2 = (i + n) % n;
+        int i3 = (i + n + dir) % n;
 
         vec2f v1 = edges[i1];
         vec2f v2 = edges[i2];
         vec2f v3 = edges[i3];
 
-        vec2f a = (vec2f) { v2.x - v1.x, v2.y - v1.y };
-        vec2f b = (vec2f) { v3.x - v2.x, v3.y - v2.y };
-        vec2f c = (vec2f) { p0.x - v3.x, p0.y - v3.y };
+        vec2f a = (vec2f) { v2.x - v1.x, v2.y - v1.y }; /* prev->curr */
+        vec2f b = (vec2f) { v3.x - v2.x, v3.y - v2.y }; /* curr->close */
+        vec2f c = (vec2f) { p0.x - v3.x, p0.y - v3.y }; /* close->first */
 
-        /* winding of current->next, next->closing, closing->first edges */
-        float ab = vec2f_cross_z(a, b), ab_s = cv_extract_sign(ab);
-        float bc = vec2f_cross_z(b, c), bc_s = cv_extract_sign(bc);
-        float cd = vec2f_cross_z(c, d), cd_s = cv_extract_sign(cd);
+        float ab = vec2f_cross_z(a, b); /* cross of prev->curr */
+        float bc = vec2f_cross_z(b, c); /* cross of curr->close */
+        float cd = vec2f_cross_z(c, d); /* cross of close->first */
 
-        if (split_at == -1) {
-            /* sign of ab changes, non-convex current->next edge */
-            if (ab_s != 0.f && ab_sl != ab_s) {
-                split_at = i + dir;
-                cv_trace("hull: contour %u edge %u current->next edge winding "
-                    "non convex\n", contour_idx, edge_idx + split_at);
+        int ab_w = cv_extract_sign(ab); /* winding of prev->curr */
+        int bc_w = cv_extract_sign(bc); /* winding of curr->close */
+        int cd_w = cv_extract_sign(cd); /* winding of close->first */
+
+        if (split_idx == -1) {
+            /* winding of prev->curr edge non-convex */
+            if (ab_w && ab_w != w) {
+                split_idx = i;
+                cv_trace("hull: contour %u edge %u prev->curr non convex\n",
+                    contour_idx, edge_idx + split_idx);
             }
-            /* sign of bc changes, non-convex next->closing edge */
-            else if (bc_s != 0.f && ab_sl != bc_s && i != start) {
-                split_at = i + dir;
-                cv_trace("hull: contour %u edge %u next->closing edge winding "
-                    "non convex\n", contour_idx, edge_idx + split_at);
+            /* winding of current->closing edge non-convex */
+            else if (bc_w && bc_w != w) {
+                split_idx = i;
+                cv_trace("hull: contour %u edge %u current->closing non convex\n",
+                    contour_idx, edge_idx + split_idx);
             }
-            /* sign of cd changes, non-convex closing->first edge */
-            else if (cd_s != 0.f && ab_sl != cd_s && i != start) {
-                split_at = i + dir;
-                cv_trace("hull: contour %u edge %u closing->first edge winding "
-                    "non convex\n", contour_idx, edge_idx + split_at);
+            /* winding of closing->first edge non-convex */
+            else if (cd_w && cd_w != w) {
+                split_idx = i;
+                cv_trace("hull: contour %u edge %u closing->first non convex\n",
+                    contour_idx, edge_idx + split_idx);
             }
         }
 
-        if (cv_ll <= cv_ll_debug)
-        {
-            cv_node *edge_node = cv_node_array_item(mb, edge_idx + i);
-            cv_debug("hull: [%-6u] %-16s %-6s (%7.3f,%7.3f) (%7.3f,%7.3f) "
-                "(%7.3f,%7.3f) (%7.3f,%7.3f) %7.1f %7.1f %7.1f\n",
-                edge_idx + i, cv_node_type_name(edge_node), "",
-                a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, ab, bc, cd);
+        if (cv_ll <= cv_ll_debug) {
+            cv_hull_edge_debug_row(mb, n, i, edge_idx, split_idx,
+                a, b, c, d, ab, bc, cd);
         }
-
-        ab_sl = ab_s;
     }
 
     /* shrink hull so it is not intersected by subsequent edges */
-    for (; i != end && split_at != -1; i += dir)
+    for (; i != e && split_idx != -1; i += dir)
     {
-        int i1 = i % n_edges;
-        int i2 = (i + n_edges + dir) % n_edges;
-        int i3 = (i + n_edges + dir + dir) % n_edges;
+        int i1 = (i + n - dir) % n;
+        int i2 = (i + n) % n;
+        int i3 = (i + n + dir) % n;
 
         vec2f v1 = edges[i1];
         vec2f v2 = edges[i2];
         vec2f v3 = edges[i3];
 
-        vec2f a = (vec2f) { v2.x - v1.x, v2.y - v1.y };
-        vec2f b = (vec2f) { v3.x - v2.x, v3.y - v2.y };
-        vec2f c = (vec2f) { p0.x - v3.x, p0.y - v3.y };
+        vec2f a = (vec2f) { v2.x - v1.x, v2.y - v1.y }; /* prev->curr */
+        vec2f b = (vec2f) { v3.x - v2.x, v3.y - v2.y }; /* curr->close */
+        vec2f c = (vec2f) { p0.x - v3.x, p0.y - v3.y }; /* close->first */
 
-        /* winding of current->next, next->closing, closing->first edges */
-        float ab = vec2f_cross_z(a, b), ab_s = cv_extract_sign(ab);
-        float bc = vec2f_cross_z(b, c), bc_s = cv_extract_sign(bc);
-        float cd = vec2f_cross_z(c, d), cd_s = cv_extract_sign(cd);
+        float ab = vec2f_cross_z(a, b); /* cross of prev->curr */
+        float bc = vec2f_cross_z(b, c); /* cross of curr->close */
+        float cd = vec2f_cross_z(c, d); /* cross of close->first */
+
+        int ab_w = cv_extract_sign(ab); /* winding of prev->curr */
+        int bc_w = cv_extract_sign(bc); /* winding of curr->close */
+        int cd_w = cv_extract_sign(cd); /* winding of close->first */
 
         /* walk backwards from the convex split point reducing the
          * size of the hull until the current point is not inside it */
         uint inside = 1;
         do {
-            for (uint j = start; inside && j != split_at + dir; j += dir)
+            for (uint j = s; inside && j != split_idx + dir; j += dir)
             {
                 /* end point of the last edge is stored in the next
-                 * edge so we must wrap around to the start edge */
-                int i1 = j % n_edges;
-                int i2 = (j + dir == split_at + dir ? start : j + dir) % n_edges;
+                 * edge so we must wrap split_idx + dir to start. */
+                int i1 = j % n;
+                int i2 = (j + dir == split_idx + dir ? s : j + dir) % n;
 
-                vec2f p1 = edges[i1 % n_edges];
-                vec2f p2 = edges[i2 % n_edges];
+                vec2f p1 = edges[i1 % n];
+                vec2f p2 = edges[i2 % n];
 
                 float d = vec2f_line_dist(p1, p2, v1);
                 float b = cv_extract_sign(d);
@@ -410,38 +405,33 @@ static int hull_convex_trace_contour(hull_state* state, vec2f o, float s,
             }
             if (inside) {
                 cv_trace("hull: contour edge %u inside %u:%u\n",
-                         edge_idx + i, edge_idx, edge_idx + split_at);
+                         edge_idx + i, edge_idx, edge_idx + split_idx);
             }
-        } while (inside && (split_at -= dir) != start);
+        } while (inside && (split_idx -= dir) != s);
 
-        if (cv_ll <= cv_ll_debug)
-        {
-            char str[16];
-            snprintf(str, sizeof(str), "%-6d", edge_idx + split_at);
-            cv_node *edge_node = cv_node_array_item(mb, edge_idx + i);
-            cv_debug("hull: [%-6u] %-16s %-6s (%7.3f,%7.3f) (%7.3f,%7.3f) "
-                "(%7.3f,%7.3f) (%7.3f,%7.3f) %7.1f %7.1f %7.1f\n",
-                edge_idx + i, cv_node_type_name(edge_node), str,
-                a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, ab, bc, cd);
+        if (cv_ll <= cv_ll_debug) {
+            cv_hull_edge_debug_row(mb, n, i, edge_idx, split_idx,
+                a, b, c, d, ab, bc, cd);
         }
     }
 
-    return split_at;
+    return split_idx;
 }
 
 static float hull_px(vec2f o, float s, vec2f p) { return o.x + p.x * s; }
 static float hull_py(vec2f o, float s, vec2f p) { return o.y + p.y * s; }
 
-static int hull_convex_draw_contour(hull_state* state, vec2f o, float s,
-    uint contour_idx, vec2f *edges, int n_edges, int start, int end,
+static int hull_convex_draw_contour(hull_state* state, vec2f o, float x,
+    uint contour_idx, vec2f *edges, int n, int s, int e,
     int dir, int w, int r)
 {
     cv_manifold* mb = state->mb;
     NVGcontext* vg = state->vg;
 
-    int split_at = r;
+    int split_idx = r;
     int edge_idx = contour_idx + 1;
-    vec2f p0 = edges[start];
+    int j0 = s % n;
+    vec2f p0 = edges[j0];
 
     NVGcolor blue = nvgRGB(0x4e,0x79,0xa7);
     NVGcolor green = nvgRGB(0x8c,0xd1,0x7d);
@@ -453,34 +443,34 @@ static int hull_convex_draw_contour(hull_state* state, vec2f o, float s,
     nvgLineCap(vg, NVG_ROUND);
 
     nvgBeginPath(vg);
-    nvgMoveTo(vg, hull_px(o,s,p0), hull_py(o,s,p0));
-    for (int i = start; i != end; i += dir)
+    nvgMoveTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
+    for (int i = s; i != e; i += dir)
     {
-        int i2 = (i + n_edges + dir) % n_edges;
+        int i2 = (i + n + dir) % n;
         vec2f v2 = edges[i2];
-        nvgLineTo(vg, hull_px(o,s,v2), hull_py(o,s,v2));
+        nvgLineTo(vg, hull_px(o,x,v2), hull_py(o,x,v2));
     }
-    nvgLineTo(vg, hull_px(o,s,p0), hull_py(o,s,p0));
+    nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
     nvgStrokeColor(vg, blue);
     nvgStroke(vg);
 
     nvgBeginPath(vg);
-    nvgMoveTo(vg, hull_px(o,s,p0), hull_py(o,s,p0));
-    for (int i = start; i != end && i != split_at; i += dir)
+    nvgMoveTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
+    for (int i = s; i != e && i != split_idx; i += dir)
     {
-        int i2 = (i + n_edges + dir) % n_edges;
+        int i2 = (i + n + dir) % n;
         vec2f v2 = edges[i2];
-        nvgLineTo(vg, hull_px(o,s,v2), hull_py(o,s,v2));
+        nvgLineTo(vg, hull_px(o,x,v2), hull_py(o,x,v2));
     }
-    nvgLineTo(vg, hull_px(o,s,p0), hull_py(o,s,p0));
+    nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
     nvgStrokeColor(vg, green);
     nvgStroke(vg);
 
-    for (int i = start; i != end; i += dir)
+    for (int i = s; i != e; i += dir)
     {
-        int i1 = i % n_edges;
-        int i2 = (i + n_edges + dir) % n_edges;
-        int i3 = (i + n_edges + dir + dir) % n_edges;
+        int i1 = i % n;
+        int i2 = (i + n + dir) % n;
+        int i3 = (i + n + dir + dir) % n;
 
         vec2f v1 = edges[i1];
         vec2f v2 = edges[i2];
@@ -489,11 +479,11 @@ static int hull_convex_draw_contour(hull_state* state, vec2f o, float s,
         char txt[16];
         float bounds[4];
 
-        snprintf(txt, sizeof(txt), "%d", edge_idx + i);
+        snprintf(txt, sizeof(txt), "%d", edge_idx + (dir == 1 ? i1 : i2));
         nvgFontSize(vg, 12.0f);
         nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
 
-        nvgTextBounds(vg, hull_px(o,s,v3), hull_py(o,s,v3), txt, NULL, bounds);
+        nvgTextBounds(vg, hull_px(o,x,v3), hull_py(o,x,v3), txt, NULL, bounds);
 
         nvgBeginPath(vg);
         nvgFillColor(vg, yellow);
@@ -505,7 +495,7 @@ static int hull_convex_draw_contour(hull_state* state, vec2f o, float s,
         nvgFill(vg);
 
         nvgFillColor(vg, charcoal);
-        nvgText(vg, hull_px(o,s,v3), hull_py(o,s,v3), txt, NULL);
+        nvgText(vg, hull_px(o,x,v3), hull_py(o,x,v3), txt, NULL);
     }
 }
 
@@ -517,9 +507,9 @@ static int hull_convex_transform_contour(hull_state* state, vec2f o, float s,
     uint next = cv_node_next(node);
 
     uint edge_idx = idx + 1, edge_end = next ? next : end;
-    uint n_edges = edge_idx < edge_end ? edge_end - edge_idx : 0;
-    vec2f *edges = (vec2f*)alloca(sizeof(vec2f) * n_edges);
-    for (uint i = 0; i < n_edges; i++) {
+    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
+    vec2f *edges = (vec2f*)alloca(sizeof(vec2f) * n);
+    for (uint i = 0; i < n; i++) {
         edges[i] = cv_edge_point(mb, edge_idx + i);
     }
 
@@ -533,16 +523,12 @@ static int hull_convex_transform_contour(hull_state* state, vec2f o, float s,
     int r;
     switch (opts) {
     case cv_hull_transform_forward:
-        r = hull_convex_trace_contour(state, o, s, idx, edges, n_edges,
-                                      0, n_edges, 1, w);
-            hull_convex_draw_contour(state, o, s, idx, edges, n_edges,
-                                     0, n_edges, 1, w, r);
+        r = hull_convex_trace_contour(state, idx, edges, n, 0, 1, n+1, 1, w);
+            hull_convex_draw_contour(state, o, s, idx, edges, n, 0, n, 1, w, r);
         break;
     case cv_hull_transform_reverse:
-        r = hull_convex_trace_contour(state, o, s, idx, edges, n_edges,
-                                      n_edges-1, -1, -1, -w);
-            hull_convex_draw_contour(state, o, s, idx, edges, n_edges,
-                                     n_edges-1, -1, -1, -w, r);
+        r = hull_convex_trace_contour(state, idx, edges, n, n, n-1, -1, -1, -w);
+            hull_convex_draw_contour(state, o, s, idx, edges, n, n, 0, -1, -w, r);
         break;
     }
 
