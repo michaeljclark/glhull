@@ -165,7 +165,7 @@ static void print_help(int argc, char **argv)
         "  -i, --text <contour>               text file\n"
         "  -g, --glyph <int>                  character code\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
-        "  -t, --trace (auto|fwd|rev)         contour trace\n"
+        "  -t, --trace (fwd|rev)              contour trace\n"
         "  -dm, --dump-metrics                dump metrics\n"
         "  -ds, --dump-stats                  dump stats\n"
         "  -dg, --dump-graph                  dump graph\n"
@@ -213,9 +213,7 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-t", "--trace")) {
             char* order = argv[++i];
-            if (strcmp(order, "auto") == 0) {
-                opt_trace = cv_hull_transform_auto;
-            } else if (strcmp(order, "fwd") == 0) {
+            if (strcmp(order, "fwd") == 0) {
                 opt_trace = cv_hull_transform_forward;
             } else if (strcmp(order, "rev") == 0) {
                 opt_trace = cv_hull_transform_reverse;

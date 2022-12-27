@@ -532,12 +532,6 @@ static int hull_convex_transform_contour(hull_state* state, vec2f o, float s,
 
     int r;
     switch (opts) {
-    case cv_hull_transform_auto:
-        r = hull_convex_trace_contour(state, o, s, idx, edges, n_edges,
-                                      0, n_edges, 1, w);
-            hull_convex_draw_contour(state, o, s, idx, edges, n_edges,
-                                     0, n_edges, 1, w, r);
-        break;
     case cv_hull_transform_forward:
         r = hull_convex_trace_contour(state, o, s, idx, edges, n_edges,
                                       0, n_edges, 1, w);
@@ -684,7 +678,7 @@ static void print_help(int argc, char **argv)
         "  -g, --glyph <int>                  character code\n"
         "  -c, --count                        count edges\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
-        "  -t, --trace (auto|fwd|rev)         contour trace\n"
+        "  -t, --trace (fwd|rev)              contour trace\n"
         "  -w, --write-image <pngfile>        write image\n"
         "  -h, --help                         command line help\n",
         argv[0]
@@ -732,9 +726,7 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-t", "--trace")) {
             char* order = argv[++i];
-            if (strcmp(order, "auto") == 0) {
-                opt_trace = cv_hull_transform_auto;
-            } else if (strcmp(order, "fwd") == 0) {
+            if (strcmp(order, "fwd") == 0) {
                 opt_trace = cv_hull_transform_forward;
             } else if (strcmp(order, "rev") == 0) {
                 opt_trace = cv_hull_transform_reverse;

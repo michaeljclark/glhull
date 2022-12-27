@@ -719,9 +719,8 @@ static uint cv_hull_rotate(cv_manifold *ctx, uint idx, uint offset)
 
 enum cv_hull_transform_opt
 {
-    cv_hull_transform_auto = 1,
-    cv_hull_transform_forward = 2,
-    cv_hull_transform_reverse = 3,
+    cv_hull_transform_forward = 0,
+    cv_hull_transform_reverse = 1,
 };
 
 typedef struct cv_transform cv_transform;
@@ -934,9 +933,6 @@ static int cv_hull_transform_contour(cv_transform *ctx, uint idx, uint end, uint
 
     int r;
     switch (opts) {
-    case cv_hull_transform_auto:
-        r = cv_hull_trace_contour(ctx, idx, edges, n_edges,         0, n_edges,  1, w);
-        break;
     case cv_hull_transform_forward:
         r = cv_hull_trace_contour(ctx, idx, edges, n_edges,         0, n_edges,  1, w);
         break;
