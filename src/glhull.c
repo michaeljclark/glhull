@@ -333,9 +333,9 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
     nvgMoveTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
     for (int i = s; i != e; i += dir)
     {
-        int i2 = (i + n + dir) % n;
-        vec2f v2 = edges[i2];
-        nvgLineTo(vg, hull_px(o,x,v2), hull_py(o,x,v2));
+        int i1 = (i + n + dir) % n;
+        vec2f v1 = edges[i1];
+        nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
     }
     nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
     nvgStrokeColor(vg, blue);
@@ -345,9 +345,9 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
     nvgMoveTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
     for (int i = s; i != e && i != split_idx; i += dir)
     {
-        int i2 = (i + n + dir) % n;
-        vec2f v2 = edges[i2];
-        nvgLineTo(vg, hull_px(o,x,v2), hull_py(o,x,v2));
+        int i1 = (i + n + dir) % n;
+        vec2f v1 = edges[i1];
+        nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
     }
     nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
     nvgStrokeColor(vg, green);
@@ -357,21 +357,16 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
     {
         int i1 = (i + n) % n;
         int i2 = (i + n + dir) % n;
-        int i3 = (i + n + dir + dir) % n;
-
-        vec2f v1 = edges[i1];
-        vec2f v2 = edges[i2];
-        vec2f v3 = (vec2f) { (v1.x + v2.x) *0.5f, (v1.y + v2.y) *0.5f };
+        uint i0 = (dir == 1 ? i1 : i2);
+        vec2f v0 = edges[i0];
 
         char txt[16];
         float bounds[4];
 
-        snprintf(txt, sizeof(txt), "%d", edge_idx + (dir == 1 ? i1 : i2));
+        snprintf(txt, sizeof(txt), "%d", edge_idx + i0);
         nvgFontSize(vg, 12.0f);
         nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
-
-        nvgTextBounds(vg, hull_px(o,x,v3), hull_py(o,x,v3), txt, NULL, bounds);
-
+        nvgTextBounds(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL, bounds);
         nvgBeginPath(vg);
         nvgFillColor(vg, (i0 % n) == 0 ? pink : yellow);
         nvgRoundedRect(vg, (int)bounds[0]-4,
@@ -380,9 +375,8 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
                            (int)(bounds[3]-bounds[1])+4,
                            ((int)(bounds[3]-bounds[1])+4)/2-1);
         nvgFill(vg);
-
         nvgFillColor(vg, charcoal);
-        nvgText(vg, hull_px(o,x,v3), hull_py(o,x,v3), txt, NULL);
+        nvgText(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL);
     }
 }
 
