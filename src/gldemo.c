@@ -53,10 +53,8 @@ struct hull_state
     FT_Face ftface;
 };
 
-void hull_state_init(hull_state* state)
+static void hull_vg_init(hull_state* state)
 {
-    FT_Error fterr;
-
     state->vg = nvgCreateGLES3(NVG_ANTIALIAS | NVG_STENCIL_STROKES | NVG_DEBUG);
     if (!state->vg) {
         cv_panic("hull_state_init: error initializing nanovg\n");
@@ -64,6 +62,11 @@ void hull_state_init(hull_state* state)
 
     state->fontNormal = nvgCreateFont(state->vg, "sans", dejavu_regular_fontpath);
     state->fontBold = nvgCreateFont(state->vg, "sans-bold", dejavu_bold_fontpath);
+}
+
+void hull_graph_init(hull_state* state)
+{
+    FT_Error fterr;
 
     state->mb = (cv_manifold*)calloc(1, sizeof(cv_manifold));
     cv_manifold_init(state->mb);
@@ -74,10 +77,16 @@ void hull_state_init(hull_state* state)
     cv_dump_graph(state->mb);
 }
 
-void hull_state_destroy(hull_state* state)
+void hull_vg_destroy(hull_state* state)
 {
     nvgDeleteGLES3(state->vg);
+}
+
+void hull_graph_destroy(hull_state* state)
+{
     cv_manifold_destroy(state->mb);
+    cv_done_ftface(state->ftface);
+    cv_done_ftlib(state->ftlib);
     free(state->mb);
 }
 
@@ -278,7 +287,7 @@ int main()
     double prevt = 0;
 
     memset(&state, 0, sizeof(state));
-    hull_state_init(&state);
+    hull_graph_init(&state);
 
     if (!glfwInit()) {
         cv_panic("glfwInit failed\n");
@@ -313,6 +322,8 @@ int main()
 
     prevt = glfwGetTime();
 
+    hull_vg_init(&state);
+
     while (!glfwWindowShouldClose(window))
     {
         double mx, my, t, dt;
@@ -342,7 +353,9 @@ int main()
         glfwPollEvents();
     }
 
-    hull_state_destroy(&state);
+    hull_vg_destroy(&state);
+    hull_graph_destroy(&state);
+
     glfwTerminate();
 
     return 0;

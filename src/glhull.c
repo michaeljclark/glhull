@@ -137,6 +137,8 @@ void hull_vg_destroy(hull_state* state)
 void hull_graph_destroy(hull_state* state)
 {
     cv_manifold_destroy(state->mb);
+    cv_done_ftface(state->ftface);
+    cv_done_ftlib(state->ftlib);
     free(state->mb);
 }
 

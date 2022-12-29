@@ -492,6 +492,11 @@ static FT_Library cv_init_ftlib()
     return ftlib;
 }
 
+static void cv_done_ftlib(FT_Library ftlib)
+{
+    FT_Done_Library(ftlib);
+}
+
 static FT_Face cv_load_ftface(FT_Library ftlib, const char* fontpath)
 {
     FT_Error fterr;
@@ -504,6 +509,11 @@ static FT_Face cv_load_ftface(FT_Library ftlib, const char* fontpath)
     FT_Select_Charmap(ftface, FT_ENCODING_UNICODE);
 
     return ftface;
+}
+
+static void cv_done_ftface(FT_Face ftface)
+{
+    FT_Done_Face(ftface);
 }
 
 static uint cv_load_ftglyph(cv_manifold *ctx, FT_Face ftface,
