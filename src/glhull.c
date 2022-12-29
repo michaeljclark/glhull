@@ -58,41 +58,44 @@ struct hull_state
     uint shape;
     uint contour;
     uint point;
+    int max_edges;
+    int edge_count;
     int fontNormal;
     int fontBold;
     FT_Library ftlib;
     FT_Face ftface;
 };
 
-static int max_edges = 0;
-static int edge_count = 0;
-
 static int hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth, void *userdata)
 {
+    hull_state *state = (hull_state*)userdata;
     cv_node *node = cv_node_array_item(ctx, idx);
     uint type = cv_node_type(node);
     switch (type) {
     case cv_type_2d_shape:
         break;
     case cv_type_2d_contour:
-        max_edges = cv_max(max_edges, edge_count);
-        edge_count = 0;
+        state->max_edges = cv_max(state->max_edges, state->edge_count);
+        state->edge_count = 0;
         break;
     case cv_type_2d_edge_linear:
     case cv_type_2d_edge_conic:
     case cv_type_2d_edge_cubic:
-        edge_count++;
+        state->edge_count++;
         break;
     }
     return 1;
 }
 
-static uint hull_max_edges(cv_manifold *ctx)
+static uint hull_max_edges(hull_state* state, uint idx)
 {
-    uint end = array_buffer_count(&ctx->nodes);
-    cv_traverse_nodes(ctx, 0, end, 0, 0, hull_count_edges);
-    max_edges = cv_max(max_edges, edge_count);
-    return max_edges;
+    cv_node *node = cv_node_array_item(state->mb, idx);
+    uint end = cv_node_next(node) ? cv_node_next(node)
+                                  : array_buffer_count(&state->mb->nodes);
+    state->max_edges = state->edge_count = 0;
+    cv_traverse_nodes(state->mb, idx, end, 0, state, hull_count_edges);
+    state->max_edges = cv_max(state->max_edges, state->edge_count);
+    return state->max_edges;
 }
 
 static void hull_vg_init(hull_state* state)
@@ -673,7 +676,8 @@ void glhull_app(int argc, char **argv)
 
     if (opt_count) {
         cv_dump_graph(state.mb);
-        printf("%d\n", hull_max_edges(state.mb));
+        cv_glyph *glyph = cv_glyph_array_item(state.mb, state.glyph);
+        printf("%d\n", hull_max_edges(&state, glyph->shape));
         hull_graph_destroy(&state);
         exit(0);
     }
