@@ -26,8 +26,11 @@
 #include "nanovg_gl.h"
 #include "nanovg_gl_utils.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+//#define STB_IMAGE_WRITE_IMPLEMENTATION
+//#include "stb_image_write.h"
+
+#define FPNG_IMAGE_WRITE_IMPLEMENTATION
+#include "fpng_c.h"
 
 #include "linmath.h"
 #include "gl2_util.h"
@@ -652,6 +655,9 @@ static void hull_save_screenshot(int w, int h, const char* filename)
     image_flip_horiz(image, w, h, w*4);
 #ifdef STB_IMAGE_WRITE_IMPLEMENTATION
     stbi_write_png(filename, w, h, 4, image, w*4);
+#endif
+#ifdef FPNG_IMAGE_WRITE_IMPLEMENTATION
+    fpng_encode_image_to_file(filename, image, w, h, 4, 0);
 #endif
     free(image);
 }

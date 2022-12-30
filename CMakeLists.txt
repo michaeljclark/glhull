@@ -66,6 +66,13 @@ else ()
     list(APPEND GLFW_LIBS_ALL ${OPENGL_opengl_LIBRARY})
 endif ()
 
+# fpng
+include_directories(third_party/fpng)
+add_library(fpng third_party/fpng/fpng.cpp third_party/fpng/fpng_c.cpp)
+target_compile_definitions(fpng PRIVATE -DFPNG_NO_SSE=0 -D_LARGEFILE64_SOURCE=1 -D_FILE_OFFSET_BITS=64)
+target_compile_options(fpng PRIVATE -fno-strict-aliasing -msse4.1 -mpclmul)
+list(APPEND GLFW_LIBS_ALL fpng)
+
 # Find FreeType2 library
 find_package(PkgConfig)
 pkg_check_modules(FT2 freetype2)
