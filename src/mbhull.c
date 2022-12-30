@@ -28,12 +28,12 @@ static const char* curves_shader_glsl = "shaders/curves.comp";
 
 enum { opt_dump_metrics = 0x1, opt_dump_stats = 0x2, opt_dump_graph = 0x4 };
 
-static int opt_help = 0;
-static int opt_dump = 0;
-static int opt_glyph = 0;
-static int opt_rotate = 0;
-static int opt_trace = 0;
-static int opt_gpu = 0;
+static int opt_help;
+static int opt_dump;
+static int opt_glyph;
+static int opt_rotate;
+static int opt_trace;
+static int opt_gpu;
 static char* opt_fontpath;
 static char* opt_textpath;
 
@@ -50,7 +50,6 @@ typedef struct hull_state hull_state;
 struct hull_state
 {
     cv_manifold* mb;
-    uint glyph;
     uint shape;
     uint contour;
     uint point;
@@ -133,13 +132,14 @@ static void hull_graph_init(hull_state* state)
     if (opt_fontpath) {
         state->ftlib = cv_init_ftlib();
         state->ftface = cv_load_ftface(state->ftlib, opt_fontpath);
-        state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+        cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
     } else if (opt_textpath) {
-        state->glyph = cv_load_glyph_text_file(state->mb, opt_textpath);
+        cv_load_glyph_text_file(state->mb, opt_textpath, opt_glyph);
     }
 
     if (opt_rotate > 0) {
-        cv_hull_rotate(state->mb, state->glyph, opt_rotate);
+        uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
+        cv_hull_rotate(state->mb, glyph, opt_rotate);
     }
 }
 
@@ -272,22 +272,21 @@ static void glcurves(int argc, char **argv)
     gladLoadGL();
 
     if ((opt_dump & opt_dump_metrics) > 0) {
-        cv_dump_metrics(state.mb, state.glyph);
-        puts("");
+        uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
+        cv_dump_metrics(state.mb, glyph);
     }
     if ((opt_dump & opt_dump_stats) > 0) {
         cv_dump_stats(state.mb);
-        puts("");
     }
     if ((opt_dump & opt_dump_graph) > 0) {
         cv_dump_graph(state.mb);
-        puts("");
     }
 
     cv_manifold dst;
     cv_manifold_init(&dst);
-    cv_glyph *glyph = cv_glyph_array_item(state.mb, state.glyph);
-    cv_hull_transform(state.mb, &dst, glyph->shape, opt_trace);
+    uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
+    cv_glyph *g = cv_glyph_array_item(state.mb, glyph);
+    cv_hull_transform(state.mb, &dst, g->shape, opt_trace);
 
     if (opt_gpu > 0) {
         cv_manifold_gpu mbo = { state.mb };

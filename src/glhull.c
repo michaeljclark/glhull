@@ -39,8 +39,13 @@ static const char* dejavu_regular_fontpath = "fonts/DejaVuSans-Bold.ttf";
 static const char* dejavu_bold_fontpath = "fonts/DejaVuSans-Bold.ttf";
 static const char* curves_shader_glsl = "shaders/curves.comp";
 
+enum { opt_dump_metrics = 0x1, opt_dump_stats = 0x2, opt_dump_graph = 0x4 };
+
 static int opt_help;
+static int opt_dump;
 static int opt_glyph;
+static int opt_glyph_s;
+static int opt_glyph_e;
 static int opt_rotate;
 static int opt_trace;
 static int opt_count;
@@ -54,7 +59,6 @@ struct hull_state
     GLFWwindow* window;
     NVGcontext* vg;
     cv_manifold* mb;
-    uint glyph;
     uint shape;
     uint contour;
     uint point;
@@ -119,17 +123,23 @@ static void hull_graph_init(hull_state* state)
     if (opt_fontpath) {
         state->ftlib = cv_init_ftlib();
         state->ftface = cv_load_ftface(state->ftlib, opt_fontpath);
-        state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+        if (opt_glyph) {
+            cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+        }
+        if (opt_glyph_s && opt_glyph_e) {
+            for (int cp = opt_glyph_s; cp <= opt_glyph_e; cp++) {
+                cv_load_ftglyph(state->mb, state->ftface, 12, 100, cp);
+            }
+        }
     } else if (opt_textpath) {
-        state->glyph = cv_load_glyph_text_file(state->mb, opt_textpath);
+        cv_load_glyph_text_file(state->mb, opt_textpath, opt_glyph);
     }
 
     if (opt_rotate > 0) {
-        cv_glyph *glyph = cv_glyph_array_item(state->mb, state->glyph);
-        cv_hull_rotate(state->mb, glyph->shape, opt_rotate);
+        uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
+        cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
+        cv_hull_rotate(state->mb, g->shape, opt_rotate);
     }
-
-    cv_dump_graph(state->mb);
 }
 
 void hull_vg_destroy(hull_state* state)
@@ -493,33 +503,114 @@ static int hull_convex_transform_shapes(hull_state* state, vec2f o, float s,
     return 0;
 }
 
-void hull_render(hull_state* state, float mx, float my, float w, float h, float t)
+void hull_render(hull_state* state, int cp, int trace, float w, float h)
 {
     NVGcontext* vg = state->vg;
     cv_manifold* cv = state->mb;
 
-    cv_glyph *glyph = cv_glyph_array_item(cv, state->glyph);
-    cv_node *node = cv_node_array_item(cv, glyph->shape);
+    uint glyph = cv_lookup_glyph(cv, cp);
+    cv_glyph *g = cv_glyph_array_item(cv, glyph);
+    cv_node *node = cv_node_array_item(cv, g->shape);
     uint end = cv_node_next(node) ? cv_node_next(node)
                                   : array_buffer_count(&cv->nodes);
 
-    float s = 30.0f;
-    vec2f o = { - glyph->width/2 * s, + glyph->height/2 * s };
+    float s = 25.f;
+    vec2f o = { -g->width/2 * s, g->height/2 * s };
 
     nvgSave(vg);
     nvgTranslate(vg, w/2, h/2);
     nvgFillColor(vg, nvgRGB(255,255,255));
     hull_traverse_reset(state);
-    hull_traverse_nodes(state, o, s, glyph->shape, end);
+    hull_traverse_nodes(state, o, s, g->shape, end);
     if (state->shape != -1) {
         hull_path_winding(state);
         cv_draw_fill(vg);
     }
-    hull_convex_transform_shapes(state, o, s, glyph->shape, end, opt_trace);
+    hull_convex_transform_shapes(state, o, s, g->shape, end, trace);
     nvgRestore(vg);
-
-    cv_ll = cv_ll_info;
 }
+
+static int keycode_to_char(int key, int mods)
+{
+    // We convert simple Ctrl and Shift modifiers into ASCII
+    if (key >= GLFW_KEY_SPACE && key <= GLFW_KEY_EQUAL) {
+        if (mods == 0) {
+            return key - GLFW_KEY_SPACE + ' ';
+        }
+    }
+    if (key >= GLFW_KEY_A && key <= GLFW_KEY_Z) {
+        // convert Ctrl+<Key> into its ASCII control code
+        if (mods == GLFW_MOD_CONTROL) {
+            return key - GLFW_KEY_A + 1;
+        }
+        // convert Shift <Key> into ASCII
+        if (mods == GLFW_MOD_SHIFT) {
+            return key - GLFW_KEY_A + 'A';
+        }
+        // convert plain <Key> into ASCII
+        if (mods == 0) {
+            return key - GLFW_KEY_A + 'a';
+        }
+    }
+    if (key >= GLFW_KEY_LEFT_BRACKET && key < GLFW_KEY_GRAVE_ACCENT) {
+        // convert plain <Key> into ASCII
+        if (mods == GLFW_MOD_SHIFT) {
+            return key - GLFW_KEY_LEFT_BRACKET + '{';
+        }
+        if (mods == 0) {
+            return key - GLFW_KEY_LEFT_BRACKET + '[';
+        }
+    }
+    // convert Shift <Key> for miscellaneous characters
+    if (mods == GLFW_MOD_SHIFT) {
+        switch (key) {
+        case GLFW_KEY_0:          /* ' */ return ')';
+        case GLFW_KEY_1:          /* ' */ return '!';
+        case GLFW_KEY_2:          /* ' */ return '@';
+        case GLFW_KEY_3:          /* ' */ return '#';
+        case GLFW_KEY_4:          /* ' */ return '$';
+        case GLFW_KEY_5:          /* ' */ return '%';
+        case GLFW_KEY_6:          /* ' */ return '^';
+        case GLFW_KEY_7:          /* ' */ return '&';
+        case GLFW_KEY_8:          /* ' */ return '*';
+        case GLFW_KEY_9:          /* ' */ return '(';
+        case GLFW_KEY_APOSTROPHE: /* ' */ return '"';
+        case GLFW_KEY_COMMA:      /* , */ return '<';
+        case GLFW_KEY_MINUS:      /* - */ return '_';
+        case GLFW_KEY_PERIOD:     /* . */ return '>';
+        case GLFW_KEY_SLASH:      /* / */ return '?';
+        case GLFW_KEY_SEMICOLON:  /* ; */ return ':';
+        case GLFW_KEY_EQUAL:      /* = */ return '+';
+        case GLFW_KEY_GRAVE_ACCENT: /* ` */ return '~';
+        }
+    }
+    return 0;
+}
+
+static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    NVG_NOTUSED(scancode);
+    NVG_NOTUSED(mods);
+
+    hull_state *state = (hull_state*)glfwGetWindowUserPointer(window);
+
+    int c;
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+        glfwSetWindowShouldClose(window, GL_TRUE);
+    } else if ((c = keycode_to_char(key, mods)) && action == GLFW_PRESS) {
+        opt_glyph = c;
+    } else if (key == GLFW_KEY_RIGHT && action == GLFW_PRESS) {
+        uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
+        cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
+        uint num_edges = hull_max_edges(state, g->shape);
+        cv_hull_rotate(state->mb, g->shape, num_edges-1);
+    } else if (key == GLFW_KEY_LEFT && action == GLFW_PRESS) {
+        uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
+        cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
+        cv_hull_rotate(state->mb, g->shape, 1);
+    }
+}
+
 
 static void image_set_alpha(uchar* image, int w, int h, int stride, uchar a)
 {
@@ -547,28 +638,84 @@ static void image_flip_horiz(uchar* image, int w, int h, int stride)
     }
 }
 
-void save_screenshot(int w, int h, const char* name)
+static void hull_save_screenshot(int w, int h, const char* filename)
 {
     uchar* image = (uchar*)malloc(w*h*4);
     if (image == NULL) return;
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, image);
     image_set_alpha(image, w, h, w*4, 255);
     image_flip_horiz(image, w, h, w*4);
-    stbi_write_png(name, w, h, 4, image, w*4);
+#ifdef STB_IMAGE_WRITE_IMPLEMENTATION
+    stbi_write_png(filename, w, h, 4, image, w*4);
+#endif
     free(image);
 }
 
-void errorcb(int error, const char* desc)
+static void hull_batch_render(GLFWwindow* window, hull_state *state, int trace,
+    int cp, int r)
 {
-    printf("GLFW error %d: %s\n", error, desc);
+    int winWidth, winHeight, fbWidth, fbHeight;
+    float pxRatio;
+
+    static char filename[1024];
+    snprintf(filename, sizeof(filename), opt_imagepath, cp, r,
+        trace == cv_hull_transform_forward ? "fwd" : "rev");
+
+    glfwGetWindowSize(window, &winWidth, &winHeight);
+    glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+    pxRatio = (float)fbWidth / (float)winWidth;
+
+    glViewport(0, 0, fbWidth, fbHeight);
+    glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
+    nvgBeginFrame(state->vg, winWidth, winHeight, pxRatio);
+    hull_render(state, cp, trace, winWidth, winHeight);
+    nvgEndFrame(state->vg);
+
+    cv_info("batch: writing image: %s\n", filename);
+    hull_save_screenshot(fbWidth, fbHeight, filename);
 }
 
-static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
+static void hull_batch_loop(GLFWwindow* window, hull_state *state)
 {
-    NVG_NOTUSED(scancode);
-    NVG_NOTUSED(mods);
-    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-        glfwSetWindowShouldClose(window, GL_TRUE);
+    for (int cp = opt_glyph_s; cp <= opt_glyph_e; cp++)
+    {
+        uint glyph = cv_lookup_glyph(state->mb, cp);
+        cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
+        int max_edges = hull_max_edges(state, g->shape);
+        for (int r = 0; r < max_edges; r++)
+        {
+            hull_batch_render(window, state, cv_hull_transform_forward, cp, r);
+            glfwSwapBuffers(window);
+            hull_batch_render(window, state, cv_hull_transform_reverse, cp, r);
+            glfwSwapBuffers(window);
+            cv_hull_rotate(state->mb, g->shape, 1);
+        }
+    }
+}
+
+static void hull_main_loop(GLFWwindow* window, hull_state *state)
+{
+    while (!glfwWindowShouldClose(window))
+    {
+        int winWidth, winHeight;
+        int fbWidth, fbHeight;
+        float pxRatio;
+
+        glfwGetWindowSize(window, &winWidth, &winHeight);
+        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+        pxRatio = (float)fbWidth / (float)winWidth;
+
+        glViewport(0, 0, fbWidth, fbHeight);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
+
+        nvgBeginFrame(state->vg, winWidth, winHeight, pxRatio);
+        hull_render(state, opt_glyph, opt_trace, winWidth,winHeight);
+        nvgEndFrame(state->vg);
+
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+
+        cv_ll = cv_ll_info;
     }
 }
 
@@ -586,10 +733,14 @@ static void print_help(int argc, char **argv)
         "  -f, --font <ttf>                   font file\n"
         "  -i, --text <contour>               text file\n"
         "  -g, --glyph <int>                  character code\n"
+        "  -gr, --glyph-range <int>:<int>     character range\n"
         "  -c, --count                        count edges\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
         "  -t, --trace (fwd|rev)              contour trace\n"
-        "  -w, --write-image <pngfile>        write image\n"
+        "  -bt, --batch-tmpl <pngfile>        write image\n"
+        "  -dm, --dump-metrics                dump metrics\n"
+        "  -ds, --dump-stats                  dump stats\n"
+        "  -dg, --dump-graph                  dump graph\n"
         "  -h, --help                         command line help\n",
         argv[0]
     );
@@ -628,6 +779,17 @@ static void parse_options(int argc, char **argv)
         } else if (match_opt(argv[i], "-g", "--glyph")) {
             opt_glyph = atoi(argv[++i]);
             i++;
+        } else if (match_opt(argv[i], "-gr", "--glyph-range")) {
+            const char* arg = argv[++i];
+            const char* colon = strchr(arg, ':');
+            if (colon) {
+                opt_glyph_s = atoi(arg);
+                opt_glyph_e = atoi(colon+1);
+            } else {
+                cv_error("error: missing colon: --glyph-range\n");
+                opt_help++;
+            }
+            i++;
         } else if (match_opt(argv[i], "-c", "--count")) {
             opt_count = 1;
             i++;
@@ -645,8 +807,17 @@ static void parse_options(int argc, char **argv)
                 opt_help++;
             }
             i++;
-        } else if (match_opt(argv[i], "-w", "--write-image")) {
+        } else if (match_opt(argv[i], "-bt", "--batch-tmpl")) {
             opt_imagepath = argv[++i];
+            i++;
+        } else if (match_opt(argv[i], "-dm", "--dump-metrics")) {
+            opt_dump |= opt_dump_metrics;
+            i++;
+        } else if (match_opt(argv[i], "-ds", "--dump-stats")) {
+            opt_dump |= opt_dump_stats;
+            i++;
+        } else if (match_opt(argv[i], "-dg", "--dump-graph")) {
+            opt_dump |= opt_dump_graph;
             i++;
         } else {
             cv_error("error: unknown option: %s\n", argv[i]);
@@ -666,6 +837,11 @@ static void parse_options(int argc, char **argv)
     }
 }
 
+static void errorcb(int error, const char* desc)
+{
+    cv_error("GLFW error %d: %s\n", error, desc);
+}
+
 void glhull_app(int argc, char **argv)
 {
     GLFWwindow* window;
@@ -676,10 +852,22 @@ void glhull_app(int argc, char **argv)
 
     if (opt_count) {
         cv_dump_graph(state.mb);
-        cv_glyph *glyph = cv_glyph_array_item(state.mb, state.glyph);
-        printf("%d\n", hull_max_edges(&state, glyph->shape));
+        uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
+        cv_glyph *g = cv_glyph_array_item(state.mb, glyph);
+        printf("%d\n", hull_max_edges(&state, g->shape));
         hull_graph_destroy(&state);
         exit(0);
+    }
+
+    if ((opt_dump & opt_dump_metrics) > 0) {
+        uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
+        cv_dump_metrics(state.mb, glyph);
+    }
+    if ((opt_dump & opt_dump_stats) > 0) {
+        cv_dump_stats(state.mb);
+    }
+    if ((opt_dump & opt_dump_graph) > 0) {
+        cv_dump_graph(state.mb);
     }
 
     if (!glfwInit()) {
@@ -698,7 +886,7 @@ void glhull_app(int argc, char **argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
-    state.window = window = glfwCreateWindow(600, 600, "glhull", NULL, NULL);
+    state.window = window = glfwCreateWindow(512, 512, "glhull", NULL, NULL);
     if (!window) {
         cv_panic("glfwCreateWindow failed\n");
     }
@@ -718,32 +906,10 @@ void glhull_app(int argc, char **argv)
 
     hull_vg_init(&state);
 
-    while (!glfwWindowShouldClose(window))
-    {
-        double mx, my, t, dt;
-        int winWidth, winHeight;
-        int fbWidth, fbHeight;
-        float pxRatio;
-
-        glfwGetCursorPos(window, &mx, &my);
-        glfwGetWindowSize(window, &winWidth, &winHeight);
-        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
-        pxRatio = (float)fbWidth / (float)winWidth;
-
-        glViewport(0, 0, fbWidth, fbHeight);
-        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
-
-        nvgBeginFrame(state.vg, winWidth, winHeight, pxRatio);
-        hull_render(&state, mx, my, winWidth,winHeight, t);
-        nvgEndFrame(state.vg);
-
-        if (opt_imagepath) {
-            save_screenshot(fbWidth, fbHeight, opt_imagepath);
-            exit(0);
-        }
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
+    if (opt_imagepath) {
+        hull_batch_loop(window, &state);
+    } else {
+        hull_main_loop(window, &state);
     }
 
     hull_vg_destroy(&state);

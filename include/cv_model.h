@@ -33,6 +33,7 @@ typedef struct cv_meta cv_meta;
 typedef struct cv_node cv_node;
 typedef struct cv_point cv_point;
 typedef struct cv_glyph cv_glyph;
+typedef struct cv_code cv_code;
 
 typedef const FT_Vector ft_vec;
 
@@ -41,6 +42,7 @@ struct cv_node { uint type_next, attr_offset; };
 struct cv_point { vec2f v; };
 struct cv_glyph { uint codepoint, shape; float size, width, height;
                   float offset_x, offset_y, advance_x, advance_y; };
+struct cv_code { uint glyph; };
 
 /*
  * simple math
@@ -86,6 +88,7 @@ struct cv_manifold
     array_buffer nodes;
     array_buffer points;
     array_buffer glyphs;
+    array_buffer codes;
 };
 
 static void cv_manifold_init(cv_manifold *ctx)
@@ -95,6 +98,7 @@ static void cv_manifold_init(cv_manifold *ctx)
     array_buffer_init(&ctx->nodes, sizeof(cv_node), 16);
     array_buffer_init(&ctx->points, sizeof(cv_point), 16);
     array_buffer_init(&ctx->glyphs, sizeof(cv_glyph), 16);
+    array_buffer_init(&ctx->codes, sizeof(cv_code), 16);
 }
 
 static void cv_manifold_destroy(cv_manifold *ctx)
@@ -121,6 +125,11 @@ static cv_point* cv_point_array_item(cv_manifold *ctx, size_t idx)
 static cv_glyph* cv_glyph_array_item(cv_manifold *ctx, size_t idx)
 {
     return (cv_glyph*)array_buffer_data(&ctx->glyphs) + idx;
+}
+
+static cv_code* cv_code_array_item(cv_manifold *ctx, size_t idx)
+{
+    return (cv_code*)array_buffer_data(&ctx->codes) + idx;
 }
 
 static uint cv_node_type(cv_node *node) { return node->type_next >> 28; }
@@ -312,7 +321,18 @@ static uint cv_new_glyph(cv_manifold *ctx, int codepoint, int shape, float size,
         offset_x, offset_y, advance_x, advance_y
     };
     array_buffer_add(&ctx->glyphs, &g);
+    array_buffer_resize(&ctx->codes, codepoint + 1);
+    cv_code_array_item(ctx, codepoint)->glyph = idx;
     return idx;
+}
+
+static uint cv_lookup_glyph(cv_manifold *ctx, uint codepoint)
+{
+    uint ncodes = array_buffer_count(&ctx->codes);
+    if (codepoint < ncodes) {
+        return cv_code_array_item(ctx, codepoint)->glyph;
+    }
+    return 0;
 }
 
 /*
@@ -412,7 +432,7 @@ static void cv_dump_stats(cv_manifold *ctx)
         array_buffer_count(&ctx->glyphs),
         array_buffer_count(&ctx->nodes),
         array_buffer_count(&ctx->points));
-    cv_info("stats: %8s %8zu %8zu %8zu\n\n",
+    cv_info("stats: %8s %8zu %8zu %8zu\n",
         "size",
         array_buffer_size(&ctx->glyphs),
         array_buffer_size(&ctx->nodes),
@@ -603,7 +623,7 @@ static char** cv_split_buffer_items(const char* buffer,
     return items;
 }
 
-static uint cv_load_glyph_text_buffer(cv_manifold *ctx, buffer buf)
+static uint cv_load_glyph_text_buffer(cv_manifold *ctx, buffer buf, int codepoint)
 {
     size_t num_lines = 0;
     char **lines = cv_split_buffer_items(buf.data, buf.length, &num_lines, "\n");
@@ -634,14 +654,15 @@ static uint cv_load_glyph_text_buffer(cv_manifold *ctx, buffer buf)
         free(tokens);
     }
     free(lines);
-    uint glyph = cv_new_glyph(ctx, 0, ctx->shape, 0, 0, 0, 0, 0, 0, 0);
+    uint glyph = cv_new_glyph(ctx, codepoint, ctx->shape, 0, 0, 0, 0, 0, 0, 0);
     return glyph;
 }
 
-static uint cv_load_glyph_text_file(cv_manifold *ctx, const char* filename)
+static uint cv_load_glyph_text_file(cv_manifold *ctx, const char* filename,
+    int codepoint)
 {
     buffer buf = load_file(filename);
-    int glyph = cv_load_glyph_text_buffer(ctx, buf);
+    int glyph = cv_load_glyph_text_buffer(ctx, buf, codepoint);
     free(buf.data);
     return glyph;
 }

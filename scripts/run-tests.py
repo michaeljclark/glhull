@@ -4,68 +4,76 @@ import os
 import argparse
 import subprocess
 
+from enum import Enum
+
+class Level(Enum):
+    NONE = 'none'
+    INFO = 'info'
+    DEBUG = 'debug'
+    TRACE = 'trace'
+
+    def __str__(self):
+        return self.value
+
 parser = argparse.ArgumentParser(description='runs glhull tests')
-parser.add_argument('-d', '--debug', default=False, action='store_true',
-                    help='enable crefl debug output')
+parser.add_argument('-l', '--level', default=Level.INFO,
+                    type=Level, choices=list(Level))
+parser.add_argument('-f', '--font', default='fonts/DejaVuSans-Bold.ttf',
+                    help='font file')
 parser.add_argument('-o', '--output', default='tmp/out',
-                    help='reflection metadata output')
+                    help='output directory')
+parser.add_argument('-s', '--start', default=65, type=int,
+                    help='start codepoint')
+parser.add_argument('-e', '--end', default=90, type=int,
+                    help='end codepoint')
 args = parser.parse_args()
 
-def exec_test(c, r, dir):
-    os.makedirs(args.output, exist_ok = True)
-    image_file = "hull_%d_%d_%s.png" % (c, r, dir)
-    image_path = "%s/%s" % (args.output, image_file)
+def execute_batch(tmpl, i, j):
     cmd = [ './build/glhull',
-        '--font', 'fonts/DejaVuSans-Bold.ttf',
-        '--level', 'none',
-        '--trace', dir,
-        '--glyph', str(c),
-        '--rotate', str(r),
-        '--write-image', image_path ]
-    if args.debug:
-        print("%s" % cmd)
+        '--font', args.font,
+        '--level', str(args.level),
+        '--glyph-range', '%d:%d' % (i, j),
+        '--batch-tmpl', tmpl ]
     subprocess.run(cmd, check=True)
-    return image_file
 
 def count_rotations(c):
     cmd = [ './build/glhull',
-        '--font', 'fonts/DejaVuSans-Bold.ttf',
+        '--font', args.font,
         '--level', 'none',
         '--glyph', str(c),
         '--count' ]
     return int(subprocess.check_output(cmd))
 
-def exec_char(f, s, c, r, dir):
-    image_file = exec_test(c, r, dir)
-    print("<td><img width=\"%d\" height=\"%d\" src=\"%s\"/></td>" % (s, s, image_file), file=f)
-
-def exec_row(f, s, c, k, dir):
+def print_row(f, s, c, k, dir):
     print("<tr>", file=f)
     print("<td>%s</td>" % (str(c)), file=f)
     for r in range(0, k):
-        exec_char(f, s, c, r, dir)
+        image_file = "hull_%d_%d_%s.png" % (c, r, dir)
+        print("<td><img width=\"%d\" height=\"%d\" src=\"%s\"/></td>" % (s, s, image_file), file=f)
     print("</tr>", file=f)
 
-def exec_range(f, s, i, j):
-    for c in range(i, j):
+def print_range(f, s, i, j):
+    for c in range(i, j+1):
         k = count_rotations(c)
-        exec_row(f, s, c, k, 'fwd')
-        exec_row(f, s, c, k, 'rev')
+        print_row(f, s, c, k, 'fwd')
+        print_row(f, s, c, k, 'rev')
 
-def html_header(f):
+def print_header(f):
     print("<html>", file=f)
-    print("<head><title>glhull tests</title></head>", file=f)
+    print("<head><title>glhull</title></head>", file=f)
     print("<body>", file=f)
     print("<table>", file=f)
 
-def html_footer(f):
+def print_footer(f):
     print("</table>", file=f)
     print("</body>", file=f)
     print("</html>", file=f)
 
+os.makedirs(args.output, exist_ok = True)
 html_file = "%s/index.html" % (args.output)
+image_tmpl = "%s/hull_%%d_%%d_%%s.png" % (args.output)
 with open(html_file, 'w') as f:
-    html_header(f)
-    #exec_range(f,150,33,126)
-    exec_range(f,150,65,91)
-    html_footer(f)
+    print_header(f)
+    print_range(f, 128, args.start, args.end)
+    print_footer(f)
+execute_batch(image_tmpl, args.start, args.end)

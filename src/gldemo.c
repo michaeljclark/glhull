@@ -35,6 +35,8 @@ static const char* dejavu_regular_fontpath = "fonts/DejaVuSans-Bold.ttf";
 static const char* dejavu_bold_fontpath = "fonts/DejaVuSans-Bold.ttf";
 static const char* curves_shader_glsl = "shaders/curves.comp";
 
+static int opt_glyph = 66;
+
 typedef unsigned char uchar;
 
 typedef struct hull_state hull_state;
@@ -73,7 +75,7 @@ void hull_graph_init(hull_state* state)
 
     state->ftlib = cv_init_ftlib();
     state->ftface = cv_load_ftface(state->ftlib, dejavu_bold_fontpath);
-    state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, 66);
+    state->glyph = cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
     cv_dump_graph(state->mb);
 }
 
