@@ -49,6 +49,7 @@ static int opt_glyph_e;
 static int opt_rotate;
 static int opt_trace;
 static int opt_count;
+static int opt_edgelabels;
 static char* opt_imagepath;
 static char* opt_fontpath;
 static char* opt_textpath;
@@ -378,7 +379,11 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
         char txt[16];
         float bounds[4];
 
-        snprintf(txt, sizeof(txt), "%d", edge_idx + i0);
+        if (opt_edgelabels) {
+            snprintf(txt, sizeof(txt), "%d", edge_idx + i0);
+        } else {
+            snprintf(txt, sizeof(txt), "%d", i0);
+        }
         nvgFontSize(vg, 12.0f);
         nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
         nvgTextBounds(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL, bounds);
@@ -741,6 +746,7 @@ static void print_help(int argc, char **argv)
         "  -dm, --dump-metrics                dump metrics\n"
         "  -ds, --dump-stats                  dump stats\n"
         "  -dg, --dump-graph                  dump graph\n"
+        "  -e, --edge-labels                  edge labels\n"
         "  -h, --help                         command line help\n",
         argv[0]
     );
@@ -818,6 +824,9 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-dg", "--dump-graph")) {
             opt_dump |= opt_dump_graph;
+            i++;
+        } else if (match_opt(argv[i], "-e", "--edge-labels")) {
+            opt_edgelabels++;
             i++;
         } else {
             cv_error("error: unknown option: %s\n", argv[i]);
