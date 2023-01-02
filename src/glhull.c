@@ -44,6 +44,8 @@ static const char* curves_shader_glsl = "shaders/curves.comp";
 
 enum { opt_dump_metrics = 0x1, opt_dump_stats = 0x2, opt_dump_graph = 0x4 };
 
+static const float min_zoom = 2.0f, max_zoom = 256.0f;
+
 static int opt_help;
 static int opt_dump;
 static int opt_glyph;
@@ -53,6 +55,9 @@ static int opt_rotate;
 static int opt_trace;
 static int opt_count;
 static int opt_edgelabels;
+static float opt_zoom = 32.0f;
+static int opt_width = 512;
+static int opt_height = 512;
 static char* opt_imagepath;
 static char* opt_fontpath;
 static char* opt_textpath;
@@ -72,6 +77,11 @@ struct hull_state
     int fontBold;
     FT_Library ftlib;
     FT_Face ftface;
+    vec2f mouse;
+    vec2f origin;
+    float zoom;
+    vec2f last_mouse;
+    float last_zoom;
 };
 
 static int hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth, void *userdata)
@@ -522,8 +532,9 @@ void hull_render(hull_state* state, int cp, int trace, float w, float h)
     uint end = cv_node_next(node) ? cv_node_next(node)
                                   : array_buffer_count(&cv->nodes);
 
-    float s = 25.f;
-    vec2f o = { -g->width/2 * s, g->height/2 * s };
+    float s = state->zoom;
+    vec2f o = { state->origin.x - g->width * .5f * s,
+                state->origin.y + g->height * .5f * s };
 
     nvgSave(vg);
     nvgTranslate(vg, w/2, h/2);
@@ -616,6 +627,67 @@ static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
         uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
         cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
         cv_hull_rotate(state->mb, g->shape, 1);
+    }
+}
+
+static void scroll(GLFWwindow* window, double xoffset, double yoffset)
+{
+    hull_state *state = (hull_state*)glfwGetWindowUserPointer(window);
+
+    float quantum = state->zoom / 16.f;
+    float ratio = 1.f + (float)quantum / (float)state->zoom;
+    if (yoffset < 0. && state->zoom < max_zoom) {
+        state->origin.x *= ratio;
+        state->origin.y *= ratio;
+        state->zoom += quantum;
+    } else if (yoffset > 0. && state->zoom > min_zoom) {
+        state->origin.x /= ratio;
+        state->origin.y /= ratio;
+        state->zoom -= quantum;
+    }
+}
+
+static int mouse_left_drag;
+static int mouse_right_drag;
+
+static void mouse_button(GLFWwindow* window, int button, int action, int mods)
+{
+    hull_state *state = (hull_state*)glfwGetWindowUserPointer(window);
+
+    switch (button) {
+    case GLFW_MOUSE_BUTTON_LEFT:
+        mouse_left_drag = (action == GLFW_PRESS);
+        state->last_mouse = state->mouse;
+        state->last_zoom = state->zoom;
+        break;
+    case GLFW_MOUSE_BUTTON_RIGHT:
+        mouse_right_drag = (action == GLFW_PRESS);
+        state->last_mouse = state->mouse;
+        state->last_zoom = state->zoom;
+        break;
+    }
+}
+
+static void cursor_position(GLFWwindow* window, double xpos, double ypos)
+{
+    hull_state *state = (hull_state*)glfwGetWindowUserPointer(window);
+
+    state->mouse = (vec2f) { xpos, ypos };
+
+    if (mouse_left_drag) {
+        state->origin.x += state->mouse.x - state->last_mouse.x;
+        state->origin.y += state->mouse.y - state->last_mouse.y;
+        state->last_mouse = state->mouse;
+    }
+    if (mouse_right_drag) {
+        float delta0 = state->mouse.x - state->last_mouse.x;
+        float delta1 = state->mouse.y - state->last_mouse.y;
+        float zoom = state->last_zoom * powf(65.0f/64.0f,(float)-delta1);
+        if (zoom != state->zoom && zoom > min_zoom && zoom < max_zoom) {
+            state->zoom = zoom;
+            state->origin.x = (state->origin.x * (zoom / state->zoom));
+            state->origin.y = (state->origin.y * (zoom / state->zoom));
+        }
     }
 }
 
@@ -753,6 +825,9 @@ static void print_help(int argc, char **argv)
         "  -ds, --dump-stats                  dump stats\n"
         "  -dg, --dump-graph                  dump graph\n"
         "  -e, --edge-labels                  edge labels\n"
+        "  -z, --zoom <float>                 buffer zoom\n"
+        "  -w, --width <int>                  buffer width\n"
+        "  -h, --height <int>                 buffer height\n"
         "  -h, --help                         command line help\n",
         argv[0]
     );
@@ -834,6 +909,15 @@ static void parse_options(int argc, char **argv)
         } else if (match_opt(argv[i], "-e", "--edge-labels")) {
             opt_edgelabels++;
             i++;
+        } else if (match_opt(argv[i], "-z", "--zoom")) {
+            opt_zoom = (float)atof(argv[++i]);
+            i++;
+        } else if (match_opt(argv[i], "-w", "--width")) {
+            opt_width = atoi(argv[++i]);
+            i++;
+        } else if (match_opt(argv[i], "-h", "--height")) {
+            opt_height = atoi(argv[++i]);
+            i++;
         } else {
             cv_error("error: unknown option: %s\n", argv[i]);
             opt_help++;
@@ -863,6 +947,7 @@ void glhull_app(int argc, char **argv)
     hull_state state;
 
     memset(&state, 0, sizeof(state));
+    state.zoom = opt_zoom;
     hull_graph_init(&state);
 
     if (opt_count) {
@@ -901,13 +986,17 @@ void glhull_app(int argc, char **argv)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 
-    state.window = window = glfwCreateWindow(512, 512, "glhull", NULL, NULL);
+    state.window = window = glfwCreateWindow(opt_width, opt_height,
+        "glhull", NULL, NULL);
     if (!window) {
         cv_panic("glfwCreateWindow failed\n");
     }
 
     glfwSetWindowUserPointer(window, &state);
     glfwSetKeyCallback(window, key);
+    glfwSetScrollCallback(window, scroll);
+    glfwSetMouseButtonCallback(window, mouse_button);
+    glfwSetCursorPosCallback(window, cursor_position);
     glfwMakeContextCurrent(window);
     gladLoadGL();
     glfwSwapInterval(0);
