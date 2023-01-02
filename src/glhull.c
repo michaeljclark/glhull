@@ -46,6 +46,9 @@ enum { opt_dump_metrics = 0x1, opt_dump_stats = 0x2, opt_dump_graph = 0x4 };
 
 static const float min_zoom = 2.0f, max_zoom = 256.0f;
 
+static cv_log_level cv_ll_save;
+static int cv_ll_oneshot = 1;
+
 static int opt_help;
 static int opt_dump;
 static int opt_glyph;
@@ -612,6 +615,7 @@ static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
     NVG_NOTUSED(mods);
 
     hull_state *state = (hull_state*)glfwGetWindowUserPointer(window);
+    cv_ll_oneshot++;
 
     int c;
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
@@ -791,14 +795,18 @@ static void hull_main_loop(GLFWwindow* window, hull_state *state)
         glViewport(0, 0, fbWidth, fbHeight);
         glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_STENCIL_BUFFER_BIT);
 
+        cv_ll_save = cv_ll;
+        cv_ll = cv_ll_oneshot ? cv_ll_save : cv_ll_none;
+        cv_ll_oneshot = 0;
+
         nvgBeginFrame(state->vg, winWidth, winHeight, pxRatio);
         hull_render(state, opt_glyph, opt_trace, winWidth,winHeight);
         nvgEndFrame(state->vg);
 
+        cv_ll = cv_ll_save;
+
         glfwSwapBuffers(window);
         glfwPollEvents();
-
-        cv_ll = cv_ll_info;
     }
 }
 
