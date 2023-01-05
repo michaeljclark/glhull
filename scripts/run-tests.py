@@ -58,9 +58,9 @@ def print_range(f, s, i, j):
         print_row(f, s, c, k, 'fwd')
         print_row(f, s, c, k, 'rev')
 
-def print_header(f):
+def print_header(f,title):
     print("<html>", file=f)
-    print("<head><title>glhull</title></head>", file=f)
+    print("<head><title>%s</title></head>" % (title), file=f)
     print("<body>", file=f)
     print("<table>", file=f)
 
@@ -69,11 +69,14 @@ def print_footer(f):
     print("</body>", file=f)
     print("</html>", file=f)
 
+def title(font):
+    return os.path.splitext(os.path.basename(font))[0]
+
 os.makedirs(args.output, exist_ok = True)
 html_file = "%s/index.html" % (args.output)
 image_tmpl = "%s/hull_%%d_%%d_%%s.png" % (args.output)
 with open(html_file, 'w') as f:
-    print_header(f)
+    print_header(f, title(args.font))
     print_range(f, 128, args.start, args.end)
     print_footer(f)
 execute_batch(image_tmpl, args.start, args.end)
