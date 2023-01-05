@@ -31,20 +31,14 @@ enum { opt_dump_metrics = 0x1, opt_dump_stats = 0x2, opt_dump_graph = 0x4 };
 static int opt_help;
 static int opt_dump;
 static int opt_glyph;
+static int opt_glyph_s;
+static int opt_glyph_e;
 static int opt_rotate;
 static int opt_trace;
+static int opt_count;
 static int opt_gpu;
 static char* opt_fontpath;
 static char* opt_textpath;
-
-/*
- * manifold gpu structure
- */
-
-typedef struct cv_buffer cv_buffer;
-typedef struct cv_result cv_result;
-struct cv_result { uint count; };
-struct cv_buffer { void *data; size_t len; };
 
 typedef struct hull_state hull_state;
 struct hull_state
@@ -53,11 +47,54 @@ struct hull_state
     uint shape;
     uint contour;
     uint point;
+    int max_edges;
+    int edge_count;
     int fontNormal;
     int fontBold;
     FT_Library ftlib;
     FT_Face ftface;
 };
+
+static int hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth, void *userdata)
+{
+    hull_state *state = (hull_state*)userdata;
+    cv_node *node = cv_node_array_item(ctx, idx);
+    uint type = cv_node_type(node);
+    switch (type) {
+    case cv_type_2d_shape:
+        break;
+    case cv_type_2d_contour:
+        state->max_edges = cv_max(state->max_edges, state->edge_count);
+        state->edge_count = 0;
+        break;
+    case cv_type_2d_edge_linear:
+    case cv_type_2d_edge_conic:
+    case cv_type_2d_edge_cubic:
+        state->edge_count++;
+        break;
+    }
+    return 1;
+}
+
+static uint hull_max_edges(hull_state* state, uint idx)
+{
+    cv_node *node = cv_node_array_item(state->mb, idx);
+    uint end = cv_node_next(node) ? cv_node_next(node)
+                                  : array_buffer_count(&state->mb->nodes);
+    state->max_edges = state->edge_count = 0;
+    cv_traverse_nodes(state->mb, idx, end, 0, state, hull_count_edges);
+    state->max_edges = cv_max(state->max_edges, state->edge_count);
+    return state->max_edges;
+}
+
+/*
+ * manifold compute shader
+ */
+
+typedef struct cv_buffer cv_buffer;
+typedef struct cv_result cv_result;
+struct cv_result { uint count; };
+struct cv_buffer { void *data; size_t len; };
 
 typedef struct cv_manifold_gpu cv_manifold_gpu;
 struct cv_manifold_gpu
@@ -70,10 +107,6 @@ struct cv_manifold_gpu
     GLuint nodes_ssbo;
     GLuint results_ssbo;
 };
-
-/*
- * manifold compute shader
- */
 
 static void cv_init_gpu(cv_manifold_gpu *mbo)
 {
@@ -121,7 +154,6 @@ void cv_test_gpu(cv_manifold_gpu *mbo)
     printf("\ntest_gpu: result=0x%x\n", mbo->result.count);
 }
 
-
 static void hull_graph_init(hull_state* state)
 {
     FT_Error fterr;
@@ -132,7 +164,14 @@ static void hull_graph_init(hull_state* state)
     if (opt_fontpath) {
         state->ftlib = cv_init_ftlib();
         state->ftface = cv_load_ftface(state->ftlib, opt_fontpath);
-        cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+        if (opt_glyph) {
+            cv_load_ftglyph(state->mb, state->ftface, 12, 100, opt_glyph);
+        }
+        if (opt_glyph_s && opt_glyph_e) {
+            for (int cp = opt_glyph_s; cp <= opt_glyph_e; cp++) {
+                cv_load_ftglyph(state->mb, state->ftface, 12, 100, cp);
+            }
+        }
     } else if (opt_textpath) {
         cv_load_glyph_text_file(state->mb, opt_textpath, opt_glyph);
     }
@@ -164,6 +203,8 @@ static void print_help(int argc, char **argv)
         "  -f, --font <ttf>                   font file\n"
         "  -i, --text <contour>               text file\n"
         "  -g, --glyph <int>                  character code\n"
+        "  -gr, --glyph-range <int>:<int>     character range\n"
+        "  -c, --count                        count edges\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
         "  -t, --trace (fwd|rev)              contour trace\n"
         "  -dm, --dump-metrics                dump metrics\n"
@@ -207,6 +248,20 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-g", "--glyph")) {
             opt_glyph = atoi(argv[++i]);
+            i++;
+        } else if (match_opt(argv[i], "-gr", "--glyph-range")) {
+            const char* arg = argv[++i];
+            const char* colon = strchr(arg, ':');
+            if (colon) {
+                opt_glyph_s = atoi(arg);
+                opt_glyph_e = atoi(colon+1);
+            } else {
+                cv_error("error: missing colon: --glyph-range\n");
+                opt_help++;
+            }
+            i++;
+        } else if (match_opt(argv[i], "-c", "--count")) {
+            opt_count = 1;
             i++;
         } else if (match_opt(argv[i], "-r", "--rotate")) {
             opt_rotate = atoi(argv[++i]);
@@ -256,13 +311,22 @@ static void parse_options(int argc, char **argv)
  * main program
  */
 
-static void glcurves(int argc, char **argv)
+static void mbhull_app(int argc, char **argv)
 {
     GLFWwindow* window;
     hull_state state;
 
     memset(&state, 0, sizeof(state));
     hull_graph_init(&state);
+
+    if (opt_count) {
+        cv_dump_graph(state.mb);
+        uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
+        cv_glyph *g = cv_glyph_array_item(state.mb, glyph);
+        printf("%d\n", hull_max_edges(&state, g->shape));
+        hull_graph_destroy(&state);
+        exit(0);
+    }
 
     glfwInit();
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
@@ -301,6 +365,6 @@ int main(int argc, char **argv)
 {
     cv_ll = cv_ll_debug;
     parse_options(argc, argv);
-    glcurves(argc, argv);
+    mbhull_app(argc, argv);
     exit(0);
 }
