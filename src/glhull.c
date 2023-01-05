@@ -561,10 +561,6 @@ static int keycode_to_char(int key, int mods)
         }
     }
     if (key >= GLFW_KEY_A && key <= GLFW_KEY_Z) {
-        // convert Ctrl+<Key> into its ASCII control code
-        if (mods == GLFW_MOD_CONTROL) {
-            return key - GLFW_KEY_A + 1;
-        }
         // convert Shift <Key> into ASCII
         if (mods == GLFW_MOD_SHIFT) {
             return key - GLFW_KEY_A + 'A';
@@ -620,14 +616,21 @@ static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
     int c;
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
-    } else if ((c = keycode_to_char(key, mods)) && action == GLFW_PRESS) {
+    } else if ((c = keycode_to_char(key, mods)) != 0 && action == GLFW_PRESS) {
         opt_glyph = c;
-    } else if (key == GLFW_KEY_RIGHT && action == GLFW_PRESS) {
+    } else if (key == GLFW_KEY_D && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
+        switch (opt_trace) {
+        case cv_hull_transform_reverse: opt_trace = cv_hull_transform_forward; break;
+        case cv_hull_transform_forward: opt_trace = cv_hull_transform_reverse; break;
+        }
+    } else if (key == GLFW_KEY_E && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
+        opt_edgelabels = !opt_edgelabels;
+    } else if (key == GLFW_KEY_RIGHT && action == GLFW_PRESS && mods == 0) {
         uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
         cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
         uint num_edges = hull_max_edges(state, g->shape);
         cv_hull_rotate(state->mb, g->shape, num_edges-1);
-    } else if (key == GLFW_KEY_LEFT && action == GLFW_PRESS) {
+    } else if (key == GLFW_KEY_LEFT && action == GLFW_PRESS && mods == 0) {
         uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
         cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
         cv_hull_rotate(state->mb, g->shape, 1);
