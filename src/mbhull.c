@@ -37,6 +37,7 @@ static int opt_rotate;
 static int opt_trace;
 static int opt_count;
 static int opt_gpu;
+static char* opt_polypath;
 static char* opt_fontpath;
 static char* opt_textpath;
 
@@ -51,6 +52,8 @@ struct hull_state
     int edge_count;
     int fontNormal;
     int fontBold;
+    int batch_cp;
+    int batch_rot;
     FT_Library ftlib;
     FT_Face ftface;
 };
@@ -207,6 +210,7 @@ static void print_help(int argc, char **argv)
         "  -c, --count                        count edges\n"
         "  -r, --rotate <int,int,int>         contour rotate\n"
         "  -t, --trace (fwd|rev)              contour trace\n"
+        "  -bt, --batch-tmpl <txtfile>        write text\n"
         "  -dm, --dump-metrics                dump metrics\n"
         "  -ds, --dump-stats                  dump stats\n"
         "  -dg, --dump-graph                  dump graph\n"
@@ -277,6 +281,9 @@ static void parse_options(int argc, char **argv)
                 opt_help++;
             }
             i++;
+        } else if (match_opt(argv[i], "-bt", "--batch-tmpl")) {
+            opt_polypath = argv[++i];
+            i++;
         } else if (match_opt(argv[i], "-dm", "--dump-metrics")) {
             opt_dump |= opt_dump_metrics;
             i++;
@@ -305,6 +312,186 @@ static void parse_options(int argc, char **argv)
         print_help(argc, argv);
         exit(1);
     }
+}
+
+static void hull_write_poly_header(hull_state *state, FILE *f,
+    uint cp, uint rot, uint opts, uint nvertices, uint nfaces)
+{
+    cv_manifold *mb = state->mb;
+    fprintf(f, "ply\n");
+    fprintf(f, "format ascii 1.0\n");
+    fprintf(f, "comment created by mbhull\n");
+    fprintf(f, "comment codepoint %d rotation %d direction %s\n",
+        cp, rot, opts == cv_hull_transform_forward ? "fwd" : "rev");
+    fprintf(f, "element vertex %d\n", nvertices);
+    fprintf(f, "property float32 x\n");
+    fprintf(f, "property float32 y\n");
+    fprintf(f, "element face %d\n", nfaces);
+    fprintf(f, "property list uint8 int32 vertex_indices\n");
+    fprintf(f, "end_header\n");
+}
+
+static void hull_write_poly_vertices(hull_state *state, FILE *f,
+    uint idx, uint end)
+{
+    cv_manifold *mb = state->mb;
+
+    cv_node *node = cv_node_array_item(mb, idx);
+    uint next = cv_node_next(node);
+
+    uint edge_idx = idx + 1, edge_end = next ? next : end;
+    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
+
+    for (uint i = 0; i < n; i++) {
+        vec2f p = cv_edge_point(mb, edge_idx + i);
+        fprintf(f, "%f %f\n", p.x, p.y);
+    }
+}
+
+static void hull_write_poly_face(hull_state *state, FILE *f,
+    uint idx, uint end, cv_hull_range p, uint idx_offset)
+{
+    cv_manifold *mb = state->mb;
+
+    cv_node *node = cv_node_array_item(mb, idx);
+    uint next = cv_node_next(node);
+
+    uint edge_idx = idx + 1, edge_end = next ? next : end;
+    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
+    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n);
+    for (uint i = 0; i < n; i++) {
+        el[i] = cv_edge_point(mb, edge_idx + i);
+    }
+
+    int s = p.s, e = (p.s <= p.e) ? p.e : p.e + n;
+
+    if (e-s <= 1) { s = 0, e = n-1; }
+
+    fprintf(f, "%d", e-s+1);
+    switch(cv_node_attr(node)) {
+    case cv_contour_cw:
+        for (int i=e; i >= s; i--) fprintf(f, " %d", idx_offset + (i%n));
+        break;
+    case cv_contour_ccw:
+        for (int i=s; i <= e; i++) fprintf(f, " %d", idx_offset + (i%n));
+        break;
+    }
+    fprintf(f, "\n");
+}
+
+static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint opts)
+{
+    /* count contours */
+    uint idx = cidx, ncontours = 0, nvertices = 0, contour;
+    while (idx < end) {
+        cv_node *node = cv_node_array_item(state->mb, idx);
+        uint next = cv_node_next(node);
+        ncontours++;
+        idx = next ? next : end;
+    }
+
+    /* count vertices */
+    uint* vcount = (uint*)alloca(sizeof(uint) * (ncontours+1));
+    idx = cidx, contour = 0;
+    vcount[contour++] = 0;
+    while (idx < end) {
+        cv_node *node = cv_node_array_item(state->mb, idx);
+        uint next = cv_node_next(node);
+        uint edge_idx = idx + 1, edge_end = next ? next : end;
+        uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
+        nvertices += n;
+        vcount[contour++] = nvertices;
+        idx = next ? next : end;
+    }
+
+    FILE *f = stdout;
+    if (opt_polypath) {
+        static char filename[1024];
+        snprintf(filename, sizeof(filename), opt_polypath, state->batch_cp,
+            state->batch_rot, opts == cv_hull_transform_forward ? "fwd" : "rev");
+        f = fopen(filename, "w");
+        if (!f) cv_panic("batch: couldn't open file: %s\n", filename);
+        cv_info("batch: writing poly: %s\n", filename);
+    }
+
+    /* write poly header */
+    hull_write_poly_header(state, f, state->batch_cp, state->batch_rot, opts,
+        nvertices, ncontours);
+
+    /* write poly vertices */
+    idx = cidx, contour = 0;
+    while (idx < end) {
+        cv_node *node = cv_node_array_item(state->mb, idx);
+        uint next = cv_node_next(node);
+        hull_write_poly_vertices(state, f, idx, end);
+        idx = next ? next : end;
+    }
+
+    /* write poly edges */
+    idx = cidx, contour = 0;
+    while (idx < end) {
+        cv_node *node = cv_node_array_item(state->mb, idx);
+        uint next = cv_node_next(node);
+        cv_hull_range p = cv_hull_split_contour(state->mb, idx, end, opts);
+        hull_write_poly_face(state, f, idx, end, p, vcount[contour++]);
+        idx = next ? next : end;
+    }
+
+    if (f != stdout) fclose(f);
+
+    return 0;
+}
+
+static int hull_transform_shapes(hull_state *state, uint idx, uint end, uint opts)
+{
+    while (idx < end) {
+        cv_node *node = cv_node_array_item(state->mb, idx);
+        cv_trace("hull_transform_shapes: %s_%u\n", cv_node_type_name(node), idx);
+        uint next = cv_node_next(node);
+        uint contour_idx = idx + 1, contour_end = next ? next : end;
+        if (contour_idx < contour_end) {
+            hull_transform_contours(state, contour_idx, contour_end, opts);
+        }
+        idx = next ? next : end;
+    }
+    return 0;
+}
+
+static uint hull_transform(hull_state *state, uint idx, uint opts)
+{
+    cv_node *node = cv_node_array_item(state->mb, idx);
+    uint end = cv_node_next(node) ? cv_node_next(node)
+                                  : array_buffer_count(&state->mb->nodes);
+    hull_transform_shapes(state, idx, end, opts);
+}
+
+static void hull_batch(hull_state *state)
+{
+    cv_hull_range p1, p2;
+
+    for (int cp = opt_glyph_s; cp <= opt_glyph_e; cp++)
+    {
+        state->batch_cp = cp;
+        uint glyph = cv_lookup_glyph(state->mb, cp);
+        cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
+        int max_edges = hull_max_edges(state, g->shape);
+        for (int r = 0; r < max_edges; r++)
+        {
+            state->batch_rot = r;
+            hull_transform(state, g->shape, cv_hull_transform_forward);
+            hull_transform(state, g->shape, cv_hull_transform_reverse);
+            cv_hull_rotate(state->mb, g->shape, 1);
+        }
+    }
+}
+
+static void hull_main(hull_state *state)
+{
+    uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
+    cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
+    state->batch_cp = opt_glyph;
+    state->batch_rot = opt_rotate;
+    hull_transform(state, g->shape, opt_trace);
 }
 
 /*
@@ -346,11 +533,11 @@ static void mbhull_app(int argc, char **argv)
         cv_dump_graph(state.mb);
     }
 
-    cv_manifold dst;
-    cv_manifold_init(&dst);
-    uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
-    cv_glyph *g = cv_glyph_array_item(state.mb, glyph);
-    cv_hull_transform(state.mb, &dst, g->shape, opt_trace);
+    if (opt_polypath) {
+        hull_batch(&state);
+    } else {
+        hull_main(&state);
+    }
 
     if (opt_gpu > 0) {
         cv_manifold_gpu mbo = { state.mb };
