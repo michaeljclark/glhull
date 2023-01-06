@@ -322,21 +322,13 @@ static void hull_traverse_nodes(hull_state *state, vec2f o, float s,
 static float hull_px(vec2f o, float s, vec2f p) { return o.x + p.x * s; }
 static float hull_py(vec2f o, float s, vec2f p) { return o.y + p.y * s; }
 
-static int hull_convex_draw_contour(hull_state *state, uint idx, uint end,
-    vec2f o, float x, cv_hull_range hr)
+static int hull_convex_draw_contour(hull_state *state, vec2f *el, uint n,
+    uint idx, uint end, vec2f o, float x, cv_hull_range hr)
 {
     cv_manifold *mb = state->mb;
     NVGcontext* vg = state->vg;
 
-    cv_node *node = cv_node_array_item(mb, idx);
-    uint next = cv_node_next(node);
-
-    uint edge_idx = idx + 1, edge_end = next ? next : end;
-    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
-    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n);
-    for (uint i = 0; i < n; i++) {
-        el[i] = cv_edge_point(mb, edge_idx + i);
-    }
+    uint edge_idx = idx + 1;
 
     int s, e, dir, split_idx;
     if (hr.s < hr.e) {
@@ -425,12 +417,12 @@ static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
 {
     cv_manifold *mb = state->mb;
     while (idx < end) {
+        CV_EDGE_LIST(mb,n,el,idx,end);
         cv_node *node = cv_node_array_item(mb, idx);
-        cv_trace("hull_transform_contours: %s_%u\n",
-            cv_node_type_name(node), idx);
+        cv_trace("hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
+        cv_hull_range hr = cv_hull_split_contour(state->mb, el, n, idx, end, opts);
+        hull_convex_draw_contour(state, el, n, idx, end, o, s, hr);
         uint next = cv_node_next(node);
-        cv_hull_range hr = cv_hull_split_contour(state->mb, idx, end, opts);
-        hull_convex_draw_contour(state, idx, end, o, s, hr);
         idx = next ? next : end;
     }
     return 0;

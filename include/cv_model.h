@@ -1022,21 +1022,34 @@ static int cv_hull_trace_contour(cv_manifold* mb, uint contour_idx,
     return split_idx;
 }
 
+static uint cv_hull_edge_count(cv_manifold *mb, uint idx, uint end)
+{
+    cv_node *node = cv_node_array_item(mb, idx);
+    uint next = cv_node_next(node);
+    uint edge_idx = idx + 1, edge_end = next ? next : end;
+    return edge_idx < edge_end ? edge_end - edge_idx : 0;
+}
+
+static void cv_hull_edge_list(cv_manifold *mb, vec2f *el, uint n, uint edge_idx)
+{
+    for (uint i = 0; i < n; i++) {
+        el[i] = cv_edge_point(mb, edge_idx + i);
+    }
+}
+
+#define CV_EDGE_LIST(mb,n,el,idx,end) \
+    uint n = cv_hull_edge_count(mb, idx, end); \
+    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n); \
+    cv_hull_edge_list(mb, el, n, idx + 1);
 
 typedef struct cv_hull_range cv_hull_range;
 struct cv_hull_range { int s, e; };
 
-static cv_hull_range cv_hull_split_contour(cv_manifold *mb, uint idx, uint end, uint opts)
+static cv_hull_range cv_hull_split_contour(cv_manifold *mb, vec2f *el, uint n,
+    uint idx, uint end, uint opts)
 {
     cv_node *node = cv_node_array_item(mb, idx);
-    uint next = cv_node_next(node);
-
-    uint edge_idx = idx + 1, edge_end = next ? next : end;
-    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
-    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n);
-    for (uint i = 0; i < n; i++) {
-        el[i] = cv_edge_point(mb, edge_idx + i);
-    }
+    uint edge_idx = idx + 1;
 
     int w;
     switch(cv_node_attr(node)) {
@@ -1089,18 +1102,15 @@ static cv_hull_range cv_hull_split_contour(cv_manifold *mb, uint idx, uint end, 
     return r;
 }
 
-static cv_hull_range cv_hull_transform_contour(cv_transform *ctx, uint idx, uint end, uint opts)
-{
-    return cv_hull_split_contour(ctx->src, idx, end, opts);
-}
-
 static int cv_hull_transform_contours(cv_transform *ctx, uint idx, uint end, uint opts)
 {
     while (idx < end) {
+        CV_EDGE_LIST(ctx->src,n,el,idx,end);
         cv_node *node = cv_node_array_item(ctx->src, idx);
         cv_trace("cv_hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
-        cv_hull_transform_contour(ctx, idx, end, opts);
+        // todo - implement recursive algorithm using convex split primitive
+        cv_hull_range hr = cv_hull_split_contour(ctx->src, el, n, idx, end, opts);
         idx = next ? next : end;
     }
     return 0;

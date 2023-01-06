@@ -331,44 +331,23 @@ static void hull_write_poly_header(hull_state *state, FILE *f,
     fprintf(f, "end_header\n");
 }
 
-static void hull_write_poly_vertices(hull_state *state, FILE *f,
-    uint idx, uint end)
+static void hull_write_poly_vertices(hull_state *state, vec2f *el, uint n,
+    FILE *f)
 {
-    cv_manifold *mb = state->mb;
-
-    cv_node *node = cv_node_array_item(mb, idx);
-    uint next = cv_node_next(node);
-
-    uint edge_idx = idx + 1, edge_end = next ? next : end;
-    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
-
     for (uint i = 0; i < n; i++) {
-        vec2f p = cv_edge_point(mb, edge_idx + i);
-        fprintf(f, "%f %f\n", p.x, p.y);
+        fprintf(f, "%f %f\n", el[i].x, el[i].y);
     }
 }
 
-static void hull_write_poly_face(hull_state *state, FILE *f,
-    uint idx, uint end, cv_hull_range p, uint idx_offset)
+static void hull_write_poly_face(hull_state *state, vec2f *el, uint n,
+    FILE *f, uint attr, cv_hull_range p, uint idx_offset)
 {
-    cv_manifold *mb = state->mb;
-
-    cv_node *node = cv_node_array_item(mb, idx);
-    uint next = cv_node_next(node);
-
-    uint edge_idx = idx + 1, edge_end = next ? next : end;
-    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
-    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n);
-    for (uint i = 0; i < n; i++) {
-        el[i] = cv_edge_point(mb, edge_idx + i);
-    }
-
     int s = p.s, e = (p.s <= p.e) ? p.e : p.e + n;
 
     if (e-s <= 1) { s = 0, e = n-1; }
 
     fprintf(f, "%d", e-s+1);
-    switch(cv_node_attr(node)) {
+    switch(attr) {
     case cv_contour_cw:
         for (int i=e; i >= s; i--) fprintf(f, " %d", idx_offset + (i%n));
         break;
@@ -381,10 +360,12 @@ static void hull_write_poly_face(hull_state *state, FILE *f,
 
 static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint opts)
 {
+    cv_manifold *mb = state->mb;
+
     /* count contours */
     uint idx = cidx, ncontours = 0, nvertices = 0, contour;
     while (idx < end) {
-        cv_node *node = cv_node_array_item(state->mb, idx);
+        cv_node *node = cv_node_array_item(mb, idx);
         uint next = cv_node_next(node);
         ncontours++;
         idx = next ? next : end;
@@ -395,10 +376,9 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
     idx = cidx, contour = 0;
     vcount[contour++] = 0;
     while (idx < end) {
-        cv_node *node = cv_node_array_item(state->mb, idx);
+        cv_node *node = cv_node_array_item(mb, idx);
+        uint n = cv_hull_edge_count(mb, idx, end);
         uint next = cv_node_next(node);
-        uint edge_idx = idx + 1, edge_end = next ? next : end;
-        uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
         nvertices += n;
         vcount[contour++] = nvertices;
         idx = next ? next : end;
@@ -421,19 +401,21 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
     /* write poly vertices */
     idx = cidx, contour = 0;
     while (idx < end) {
-        cv_node *node = cv_node_array_item(state->mb, idx);
+        CV_EDGE_LIST(mb,n,el,idx,end);
+        cv_node *node = cv_node_array_item(mb, idx);
         uint next = cv_node_next(node);
-        hull_write_poly_vertices(state, f, idx, end);
+        hull_write_poly_vertices(state, el, n, f);
         idx = next ? next : end;
     }
 
     /* write poly edges */
     idx = cidx, contour = 0;
     while (idx < end) {
-        cv_node *node = cv_node_array_item(state->mb, idx);
-        uint next = cv_node_next(node);
-        cv_hull_range p = cv_hull_split_contour(state->mb, idx, end, opts);
-        hull_write_poly_face(state, f, idx, end, p, vcount[contour++]);
+        CV_EDGE_LIST(mb,n,el,idx,end);
+        cv_node *node = cv_node_array_item(mb, idx);
+        uint attr = cv_node_attr(node), next = cv_node_next(node);
+        cv_hull_range p = cv_hull_split_contour(mb, el, n, idx, end, opts);
+        hull_write_poly_face(state, el, n, f, attr, p, vcount[contour++]);
         idx = next ? next : end;
     }
 
