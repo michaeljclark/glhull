@@ -322,27 +322,31 @@ static void hull_traverse_nodes(hull_state *state, vec2f o, float s,
 static float hull_px(vec2f o, float s, vec2f p) { return o.x + p.x * s; }
 static float hull_py(vec2f o, float s, vec2f p) { return o.y + p.y * s; }
 
-typedef struct hull_draw_state hull_draw_state;
-struct hull_draw_state
-{
-    NVGcontext* vg;
-    cv_manifold* mb;
-    vec2f o;
-    float x;
-};
-
-static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
-    uint idx, vec2f *edges, int n, int s, int e, int dir, int r)
+static int hull_convex_draw_contour(hull_state *state, uint idx, uint end,
+    vec2f o, float x, cv_hull_range hr)
 {
     cv_manifold *mb = state->mb;
     NVGcontext* vg = state->vg;
 
-    vec2f o = ds.o;
-    float x = ds.x;
-    int split_idx = r;
-    int edge_idx = idx + 1;
+    cv_node *node = cv_node_array_item(mb, idx);
+    uint next = cv_node_next(node);
+
+    uint edge_idx = idx + 1, edge_end = next ? next : end;
+    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
+    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n);
+    for (uint i = 0; i < n; i++) {
+        el[i] = cv_edge_point(mb, edge_idx + i);
+    }
+
+    int s, e, dir, split_idx;
+    if (hr.s < hr.e) {
+        s = hr.s, e = hr.s + n, split_idx = hr.e, dir = 1;
+    } else {
+        s = hr.e + n, e = hr.e, split_idx = hr.s, dir = -1;
+    }
+
     int j0 = (s + n) % n;
-    vec2f p0 = edges[j0];
+    vec2f p0 = el[j0];
 
     NVGcolor blue = nvgRGB(0x1f,0x77,0xb4);
     NVGcolor orange = nvgRGB(0xff,0x7f,0x0e);
@@ -366,7 +370,7 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
     for (int i = s; i != e; i += dir)
     {
         int i1 = (i + n + dir) % n;
-        vec2f v1 = edges[i1];
+        vec2f v1 = el[i1];
         nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
     }
     nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
@@ -378,7 +382,7 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
     for (int i = s; i != e && i != split_idx; i += dir)
     {
         int i1 = (i + n + dir) % n;
-        vec2f v1 = edges[i1];
+        vec2f v1 = el[i1];
         nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
     }
     nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
@@ -390,7 +394,7 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
         int i1 = (i + n) % n;
         int i2 = (i + n + dir) % n;
         uint i0 = (dir == 1 ? i1 : i2);
-        vec2f v0 = edges[i0];
+        vec2f v0 = el[i0];
 
         char txt[16];
         float bounds[4];
@@ -416,80 +420,6 @@ static int hull_convex_draw_contour(hull_state *state, hull_draw_state ds,
     }
 }
 
-typedef struct hull_draw_param hull_draw_param;
-struct hull_draw_param { int s, e, dir, r; };
-
-static int hull_convex_transform_contour(hull_state* state, vec2f o, float s,
-    uint idx, uint end, uint opts)
-{
-    cv_manifold *mb = state->mb;
-    NVGcontext* vg = state->vg;
-
-    cv_node *node = cv_node_array_item(mb, idx);
-    uint next = cv_node_next(node);
-
-    uint edge_idx = idx + 1, edge_end = next ? next : end;
-    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
-    vec2f *el = (vec2f*)alloca(sizeof(vec2f) * n);
-    for (uint i = 0; i < n; i++) {
-        el[i] = cv_edge_point(mb, edge_idx + i);
-    }
-
-    int w;
-    switch(cv_node_attr(node)) {
-    case cv_contour_cw: w = -1; break;
-    case cv_contour_ccw: w = 1; break;
-    default: w = 0; break;
-    }
-
-    int r1, r2;
-    hull_draw_state ds = { vg, mb, o, s };
-    hull_draw_param dp;
-
-    switch (opts) {
-    case cv_hull_transform_forward:
-        r1 = 0;
-        do {
-            /* skip concave edges and degenerate convex hulls */
-            r2 = cv_hull_skip_contour(mb,idx,el,n,r1,n+r1,1,-w);
-            r1 = cv_hull_trace_contour(mb,idx,el,n,r2,r2,n+r2,1,w);
-            cv_trace("hull: fwd r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            dp = (hull_draw_param) { r2,r2+n,1,r1 };
-        } while (r1-r2 < 2 && r1 != -1);
-        if (r1 != -1) {
-            /* attempt to expand hull in the opposite direction */
-            r2 = cv_hull_trace_contour(mb,idx,el,n,n+r1,n+r2+1,r1,-1,-w);
-            cv_trace("hull: fwd+rev r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            dp = (hull_draw_param) { r1+n,r1,-1,r2 };
-        }
-        hull_convex_draw_contour(state,ds,idx,el,n,dp.s,dp.e,dp.dir,dp.r);
-        break;
-    case cv_hull_transform_reverse:
-        r1 = 0;
-        do {
-            /* skip concave edges and degenerate convex hulls */
-            r2 = cv_hull_skip_contour(mb,idx,el,n,n+r1,r1,-1,w);
-            r1 = cv_hull_trace_contour(mb,idx,el,n,n+r2,n+r2,r2,-1,-w);
-            cv_trace("hull: rev r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            dp = (hull_draw_param) { r2+n,r2,-1,r1 };
-        } while (r2+n-r1 < 2 && r1 != -1);
-        if (r1 != -1) {
-            /* attempt to expand hull in the opposite direction */
-            r2 = cv_hull_trace_contour(mb,idx,el,n,r1,n+r2-1,n+r1,1,w);
-            cv_trace("hull: rev+fwd r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            dp = (hull_draw_param) { r1,r1+n,1,r2 };
-        }
-        hull_convex_draw_contour(state,ds,idx,el,n,dp.s,dp.e,dp.dir,dp.r);
-        break;
-    }
-
-    return r1;
-}
-
 static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
     uint idx, uint end, uint opts)
 {
@@ -499,7 +429,8 @@ static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
         cv_trace("hull_transform_contours: %s_%u\n",
             cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
-        hull_convex_transform_contour(state, o, s, idx, end, opts);
+        cv_hull_range hr = cv_hull_split_contour(state->mb, idx, end, opts);
+        hull_convex_draw_contour(state, idx, end, o, s, hr);
         idx = next ? next : end;
     }
     return 0;
