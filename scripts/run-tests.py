@@ -2,8 +2,11 @@
 
 import os
 import sys
+import time
 import argparse
 import subprocess
+import collections
+import multiprocessing
 
 from enum import Enum
 
@@ -101,64 +104,93 @@ parser.add_argument('-l', '--level', default=Level.INFO,
                     type=Level, choices=list(Level))
 parser.add_argument('-t', '--type', default=Type.IMAGE,
                     type=Type, choices=list(Type))
-parser.add_argument('-f', '--font', default='fonts/DejaVuSans-Bold.ttf',
+parser.add_argument('-f', '--font', default=None,
                     help='font file')
+parser.add_argument("-d", "--directory", default='fonts',
+                    help="directory to search for fonts")
+parser.add_argument("--extension", default='ttf',
+                    help="file extension pattern")
 parser.add_argument('-o', '--output', default='tmp/out',
                     help='output directory')
-parser.add_argument('-s', '--start', default=65, type=int,
+parser.add_argument('-s', '--start', default=33, type=int,
                     help='start codepoint')
-parser.add_argument('-e', '--end', default=90, type=int,
+parser.add_argument('-e', '--end', default=126, type=int,
                     help='end codepoint')
+parser.add_argument('--progress', default=False, action='store_true',
+                    help='print progress during batch')
 args = parser.parse_args()
 
-def image_batch(tmpl, i, j):
+def basename_noext(font):
+    return os.path.splitext(os.path.basename(font))[0]
+
+def image_batch(tmpl, i, j, font):
     cmd = [ './build/glhull',
-        '--font', args.font,
+        '--font', font,
         '--level', str(args.level),
         '--glyph-range', '%d:%d' % (i, j),
         '--batch-tmpl', tmpl ]
     subprocess.run(cmd, check=True)
 
-def poly_batch(tmpl, i, j):
+def poly_batch(tmpl, i, j, font):
     cmd = [ './build/mbhull',
-        '--font', args.font,
+        '--font', font,
         '--level', str(args.level),
         '--glyph-range', '%d:%d' % (i, j),
         '--batch-tmpl', tmpl ]
     subprocess.run(cmd, check=True)
 
-def count_rotations(c):
+def count_rotations(c, font):
     cmd = [ './build/glhull',
-        '--font', args.font,
+        '--font', font,
         '--level', 'none',
         '--glyph', str(c),
         '--count' ]
     return int(subprocess.check_output(cmd))
 
-def check_row(f, s, c, k, dir):
-    for r in range(0, k):
-        poly_file = f % (c, r, dir)
-        ply = Polygon(poly_file)
-        if not ply.check():
-            print('non convex: codepoint %d rotation %d direction %s' % (c, r, dir))
+# global font_proc, num_fonts, num_glyphs, num_rotations, num_failed
 
-def check_range(f, s, i, j):
+def check_row(tmpl, s, c, k, dir, font):
+    num_pass = 0
+    num_fail = 0
+    for r in range(0, k):
+        poly_file = tmpl % (c, r, dir)
+        if not os.path.exists(poly_file):
+            continue
+        ply = Polygon(poly_file)
+        if ply.check():
+            num_pass = num_pass + 1
+        else:
+            print('font %s non convex codepoint %d rotation %d direction %s'
+                % (basename_noext(font), c, r, dir))
+            num_fail = num_fail + 1
+        os.unlink(poly_file)
+    return num_pass, num_fail
+
+def check_range(tmpl, s, i, j, font):
+    num_glyph = 0
+    num_pass = 0
+    num_fail = 0
     for c in range(i, j+1):
-        k = count_rotations(c)
-        check_row(f, s, c, k, 'fwd')
-        check_row(f, s, c, k, 'rev')
+        k = count_rotations(c, font)
+        fwd_pass, fwd_fail = check_row(tmpl, s, c, k, 'fwd', font)
+        rev_pass, rev_fail = check_row(tmpl, s, c, k, 'rev', font)
+        num_glyph = num_glyph + 1
+        num_pass = num_pass + fwd_pass + rev_pass
+        num_fail = num_fail + fwd_fail + rev_fail
+    return num_glyph, num_pass, num_fail
 
 def print_row(f, s, c, k, dir):
     print("<tr>", file=f)
     print("<td>%s</td>" % (str(c)), file=f)
     for r in range(0, k):
         image_file = "hull_%d_%d_%s.png" % (c, r, dir)
-        print("<td><img width=\"%d\" height=\"%d\" src=\"%s\"/></td>" % (s, s, image_file), file=f)
+        print("<td><img width=\"%d\" height=\"%d\" src=\"%s\"/></td>"
+            % (s, s, image_file), file=f)
     print("</tr>", file=f)
 
-def print_range(f, s, i, j):
+def print_range(f, s, i, j, font):
     for c in range(i, j+1):
-        k = count_rotations(c)
+        k = count_rotations(c, font)
         print_row(f, s, c, k, 'fwd')
         print_row(f, s, c, k, 'rev')
 
@@ -173,25 +205,68 @@ def print_footer(f):
     print("</body>", file=f)
     print("</html>", file=f)
 
-def title(font):
-    return os.path.splitext(os.path.basename(font))[0]
-
-def html_batch(html_file, i, j):
+def html_batch(html_file, i, j, font):
     with open(html_file, 'w') as f:
-        print_header(f, title(args.font))
-        print_range(f, 128, i, j)
+        print_header(f, basename_noext(font))
+        print_range(f, 128, i, j, font)
         print_footer(f)
 
-os.makedirs(args.output, exist_ok = True)
+file_list = []
 
-html_file = "%s/index.html" % (args.output)
-image_tmpl = "%s/hull_%%d_%%d_%%s.png" % (args.output)
-poly_tmpl = "%s/hull_%%d_%%d_%%s.ply" % (args.output)
+if args.font is not None:
+    file_list.append(args.font)
+if args.directory:
+    for dirpath, dirnames, filenames in os.walk(args.directory):
+        for filename in filenames:
+            if filename.endswith(args.extension):
+                file_list.append(os.path.join(dirpath, filename))
+
+def fmt_ns(n):
+    return "%d:%02d:%02d" % (int(n/1e9)/3600, (int(n/1e9)/60)%60, int(n/1e9)%60)
+
+def do_image_file(font):
+    out_dir = "%s/%s" % (args.output, basename_noext(font))
+    html_file = "%s/index.html" % (out_dir)
+    image_tmpl = "%s/hull_%%d_%%d_%%s.png" % (out_dir)
+    os.makedirs(out_dir, exist_ok = True)
+    html_batch(html_file, args.start, args.end, font)
+    image_batch(image_tmpl, args.start, args.end, font)
+    if args.progress:
+        print("%s" % (font))
+    return True
+
+def do_poly_file(font):
+    out_dir = "%s/%s" % (args.output, basename_noext(font))
+    poly_tmpl = "%s/hull_%%d_%%d_%%s.ply" % (out_dir)
+    os.makedirs(out_dir, exist_ok = True)
+    start_ns = time.time_ns()
+    poly_batch(poly_tmpl, args.start, args.end, font)
+    check_ns = time.time_ns()
+    num_glyph, num_pass, num_fail = check_range(poly_tmpl, 128, args.start, args.end, font)
+    end_ns = time.time_ns()
+    total_ns = end_ns - start_ns
+    batch_ns = check_ns - start_ns
+    verify_ns = end_ns - check_ns
+    if args.progress:
+        print("(batch %5.3f secs, verify %5.3f secs) %s"
+            % (batch_ns/1e9, verify_ns/1e9, font))
+    return num_glyph, num_pass, num_fail
 
 if args.type == Type.IMAGE:
-    html_batch(html_file, args.start, args.end)
-    image_batch(image_tmpl, args.start, args.end)
+    with multiprocessing.Pool(os.cpu_count()) as p:
+        results = p.map(do_image_file, file_list)
 
 if args.type == Type.POLY:
-    poly_batch(poly_tmpl, args.start, args.end)
-    check_range(poly_tmpl, 128, args.start, args.end)
+    with multiprocessing.Pool(os.cpu_count()) as p:
+        results = p.map(do_poly_file, file_list)
+        total_glyph = 0
+        total_pass = 0
+        total_fail = 0
+        for num_glyph, num_pass, num_fail in results:
+            total_glyph = total_glyph + num_glyph
+            total_pass = total_pass + num_pass
+            total_fail = total_fail + num_fail
+        percent = ( float(total_pass)/float(total_pass+total_fail)*100.0
+                    if total_pass+total_fail > 0 else 0 )
+        print("fonts %d glyphs %d rotations %d failed %d (%12.9f%%)"
+            % (len(results), total_glyph, total_pass+total_fail, total_fail, percent))
