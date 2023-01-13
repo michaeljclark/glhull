@@ -546,11 +546,15 @@ static uint cv_load_ftglyph(cv_manifold *ctx, FT_Face ftface,
     int size = font_size * 64.0f;
     int glyph_index = FT_Get_Char_Index(ftface, codepoint);
 
-    if ((fterr = FT_Set_Char_Size(ftface, size, size, dpi, dpi)))
-        cv_panic("error: FT_Set_Char_Size failed: fterr=%d\n", fterr);
+    if ((fterr = FT_Set_Char_Size(ftface, size, size, dpi, dpi))) {
+        cv_error("error: FT_Set_Char_Size failed: fterr=%d\n", fterr);
+        return -1;
+    }
 
-    if ((fterr = FT_Load_Glyph(ftface, glyph_index, 0)))
-        cv_panic("error: FT_Load_Glyph failed: fterr=%d\n", fterr);
+    if ((fterr = FT_Load_Glyph(ftface, glyph_index, 0))) {
+        cv_error("error: FT_Load_Glyph failed: fterr=%d\n", fterr);
+        return -1;
+    }
 
     FT_Matrix  matrix = { 1 * 0x10000L, 0, 0, -1 * 0x10000L };
     FT_Outline_Transform(&ftface->glyph->outline, &matrix);
