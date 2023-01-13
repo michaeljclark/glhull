@@ -565,8 +565,12 @@ static uint cv_load_ftglyph(cv_manifold *ctx, FT_Face ftface,
     if ((fterr = FT_Outline_Decompose(&ftface->glyph->outline, &ftfuncs, ctx)))
         cv_panic("error: FT_Outline_Decompose failed: fterr=%d\n", fterr);
 
-    cv_finalize_contour(ctx, ctx->contour);
-    cv_finalize_shape(ctx, ctx->shape);
+    if (ctx->contour < array_buffer_count(&ctx->nodes)) {
+        cv_finalize_contour(ctx, ctx->contour);
+    }
+    if (ctx->shape < array_buffer_count(&ctx->nodes)) {
+        cv_finalize_shape(ctx, ctx->shape);
+    }
 
     return glyph;
 }
