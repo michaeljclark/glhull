@@ -989,7 +989,10 @@ static int cv_hull_trace_contour(cv_manifold* mb, uint contour_idx,
             int mmin = cv_min(s, split_idx + dir);
             int mmax = cv_max(s, split_idx + dir);
             int b = mmin, m = mmax - mmin;
-            for (uint j = s; inside && j != split_idx + dir; j += dir)
+            for (uint j = s;
+                inside && ((dir == 1 && j < split_idx + dir) ||
+                          (dir == -1 && j > split_idx + dir));
+                j += dir)
             {
                 /* end point of the last edge is stored in the next
                  * edge so we must wrap split_idx + dir to start.
@@ -1053,6 +1056,16 @@ static void cv_hull_edge_list(cv_manifold *mb, vec2f *el, uint n, uint edge_idx)
 typedef struct cv_hull_range cv_hull_range;
 struct cv_hull_range { int s, e; };
 
+static cv_hull_range cv_hull_make(int n, int r1, int r2)
+{
+    cv_hull_range r = { r1, r2 }; return r;
+}
+
+static int cv_hull_len(int n, cv_hull_range r)
+{
+    return 1 + (r.s < r.e ? r.e - r.s : n - r.s + r.e);
+}
+
 static cv_hull_range cv_hull_split_contour(cv_manifold *mb, vec2f *el, uint n,
     uint idx, uint end, uint opts)
 {
@@ -1066,43 +1079,61 @@ static cv_hull_range cv_hull_split_contour(cv_manifold *mb, vec2f *el, uint n,
     default: w = 0; break;
     }
 
-    int r1, r2;
-    cv_hull_range r = (cv_hull_range) { 0, n-1 };
+    int r1, r2, lr1, len;
+    cv_hull_range r = { 0, n }, nr;
     switch (opts) {
     case cv_hull_transform_forward:
-        r1 = 0;
+        lr1 = r1 = 0;
         do {
             /* skip concave edges and degenerate hulls */
+            lr1 = r1;
             r2 = cv_hull_skip_contour(mb,idx,el,n,r1,n+r1,1,-w);
-            r1 = cv_hull_trace_contour(mb,idx,el,n,r2,r2,n+r2,1,w);
-            cv_trace("hull: fwd r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            if (r1 != -1) r = (cv_hull_range) { (r1+n) % n, (r2+n) % n };
-        } while (r1-r2 < 2 && r1 != -1 && r1 < n*n);
+            if (r2 != -1) {
+                r1 = cv_hull_trace_contour(mb,idx,el,n,r2,r2,n+r2,1,w);
+                if (r1 != -1) {
+                    nr = cv_hull_make(n,r2,r1); len = cv_hull_len(n,nr);
+                    if (len > 2) r = nr; else r1 = lr1 + n + 1;
+                }
+            }
+            cv_trace("hull: fwd_loop idx=%d n=%d r1=%d r2=%d s=%d e=%d len=%d\n",
+                idx, n, r1, r2, nr.s, nr.e, len);
+        } while (r2 != -1 && r1 != -1 && len < 3 && r1 < n*n);
         if (r1 != -1) {
-            /* expand hull in the opposite direction */
+            /* grow hull in the opposite direction */
             r2 = cv_hull_trace_contour(mb,idx,el,n,n+r1,n+r2+1,r1,-1,-w);
-            cv_trace("hull: fwd+rev r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            if (r2 != -1) r = (cv_hull_range) { (r2+n) % n, (r1+n) % n };
+            if (r2 != -1) {
+                nr = cv_hull_make(n,r2,r1); len = cv_hull_len(n,nr);
+                if (len > 2) r = nr;
+            }
+            cv_trace("hull: fwd_grow idx=%d n=%d r1=%d r2=%d s=%d e=%d len=%d\n",
+                idx, n, r1, r2, nr.s, nr.e, len);
         }
         break;
     case cv_hull_transform_reverse:
-        r1 = 0;
+        lr1 = r1 = 0;
         do {
             /* skip concave edges and degenerate hulls */
+            lr1 = r1;
             r2 = cv_hull_skip_contour(mb,idx,el,n,n+r1,r1,-1,w);
-            r1 = cv_hull_trace_contour(mb,idx,el,n,n+r2,n+r2,r2,-1,-w);
-            cv_trace("hull: rev r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            if (r1 != -1) r = (cv_hull_range) { (r2+n) % n, (r1+n) % n };
-        } while (r2+n-r1 < 2 && r1 != -1 && r1 < n*n);
+            if (r2 != -1) {
+                r1 = cv_hull_trace_contour(mb,idx,el,n,n+r2,n+r2,r2,-1,-w);
+                if (r1 != -1) {
+                    nr = cv_hull_make(n,r1,r2); len = cv_hull_len(n,nr);
+                    if (len > 2) r = nr; else r1 = lr1 + n - 1;
+                }
+            }
+            cv_trace("hull: rev_loop idx=%d n=%d r1=%d r2=%d s=%d e=%d len=%d\n",
+                idx, n, r1, r2, nr.s, nr.e, len);
+        } while (r2 != -1 && r1 != -1 && len < 3 && r1 < n*n);
         if (r1 != -1) {
-            /* expand hull in the opposite direction */
+            /* grow hull in the opposite direction */
             r2 = cv_hull_trace_contour(mb,idx,el,n,r1,n+r2-1,n+r1,1,w);
-            cv_trace("hull: rev+fwd r1=%d r2=%d\n",
-                cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
-            if (r2 != -1) r = (cv_hull_range) { (r1+n) % n, (r2+n) % n };
+            if (r2 != -1) {
+                nr = cv_hull_make(n,r1,r2); len = cv_hull_len(n,nr);
+                if (len > 2) r = nr;
+            }
+            cv_trace("hull: rev_grow idx=%d n=%d r1=%d r2=%d s=%d e=%d len=%d\n",
+                idx, n, r1, r2, nr.s, nr.e, len);
         }
         break;
     }

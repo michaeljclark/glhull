@@ -342,17 +342,14 @@ static void hull_write_poly_vertices(hull_state *state, vec2f *el, uint n,
 static void hull_write_poly_face(hull_state *state, vec2f *el, uint n,
     FILE *f, uint attr, cv_hull_range p, uint idx_offset)
 {
-    int s = p.s, e = (p.s <= p.e) ? p.e : p.e + n;
-
-    if (e-s <= 1) { s = 0, e = n-1; }
-
-    fprintf(f, "%d", e-s+1);
+    if (p.e < p.s) p.e += n;
+    fprintf(f, "%d", p.e - p.s + 1);
     switch(attr) {
     case cv_contour_cw:
-        for (int i=e; i >= s; i--) fprintf(f, " %d", idx_offset + (i%n));
+        for (int i=p.e; i >= p.s; i--) fprintf(f, " %d", idx_offset + (i%n));
         break;
     case cv_contour_ccw:
-        for (int i=s; i <= e; i++) fprintf(f, " %d", idx_offset + (i%n));
+        for (int i=p.s; i <= p.e; i++) fprintf(f, " %d", idx_offset + (i%n));
         break;
     }
     fprintf(f, "\n");
