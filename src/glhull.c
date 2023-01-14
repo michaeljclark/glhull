@@ -44,7 +44,7 @@ static const char* curves_shader_glsl = "shaders/curves.comp";
 
 enum { opt_dump_metrics = 0x1, opt_dump_stats = 0x2, opt_dump_graph = 0x4 };
 
-static const float min_zoom = 2.0f, max_zoom = 256.0f;
+static const float min_zoom = 2.0f, max_zoom = 2048.0f;
 
 static cv_log_level cv_ll_save;
 static int cv_ll_oneshot = 1;
@@ -58,7 +58,7 @@ static int opt_rotate;
 static int opt_trace;
 static int opt_count;
 static int opt_edgelabels;
-static float opt_zoom = 32.0f;
+static float opt_zoom = 24.0f;
 static int opt_width = 512;
 static int opt_height = 512;
 static char* opt_imagepath;
