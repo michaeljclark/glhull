@@ -1078,7 +1078,7 @@ static cv_hull_range cv_hull_split_contour(cv_manifold *mb, vec2f *el, uint n,
             cv_trace("hull: fwd r1=%d r2=%d\n",
                 cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
             if (r1 != -1) r = (cv_hull_range) { (r1+n) % n, (r2+n) % n };
-        } while (r1-r2 < 2 && r1 != -1);
+        } while (r1-r2 < 2 && r1 != -1 && r1 < n*n);
         if (r1 != -1) {
             /* expand hull in the opposite direction */
             r2 = cv_hull_trace_contour(mb,idx,el,n,n+r1,n+r2+1,r1,-1,-w);
@@ -1096,7 +1096,7 @@ static cv_hull_range cv_hull_split_contour(cv_manifold *mb, vec2f *el, uint n,
             cv_trace("hull: rev r1=%d r2=%d\n",
                 cv_hull_edge(edge_idx, n, r1), cv_hull_edge(edge_idx, n, r2));
             if (r1 != -1) r = (cv_hull_range) { (r2+n) % n, (r1+n) % n };
-        } while (r2+n-r1 < 2 && r1 != -1);
+        } while (r2+n-r1 < 2 && r1 != -1 && r1 < n*n);
         if (r1 != -1) {
             /* expand hull in the opposite direction */
             r2 = cv_hull_trace_contour(mb,idx,el,n,r1,n+r2-1,n+r1,1,w);
