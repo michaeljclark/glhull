@@ -1149,7 +1149,13 @@ static int cv_hull_transform_contours(cv_transform *ctx, uint idx, uint end, uin
         cv_trace("cv_hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
         uint next = cv_node_next(node);
         // todo - implement recursive algorithm using convex split primitive
-        cv_hull_range hr = cv_hull_split_contour(ctx->src, el, n, idx, end, opts);
+        cv_hull_range hr;
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            hr = cv_hull_split_contour(ctx->src, el, n, idx, end, opts);
+            break;
+        }
         idx = next ? next : end;
     }
     return 0;

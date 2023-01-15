@@ -420,8 +420,14 @@ static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
         CV_EDGE_LIST(mb,n,el,idx,end);
         cv_node *node = cv_node_array_item(mb, idx);
         cv_trace("hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
-        cv_hull_range hr = cv_hull_split_contour(state->mb, el, n, idx, end, opts);
-        hull_convex_draw_contour(state, el, n, idx, end, o, s, hr);
+        cv_hull_range hr;
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            hr = cv_hull_split_contour(state->mb, el, n, idx, end, opts);
+            hull_convex_draw_contour(state, el, n, idx, end, o, s, hr);
+            break;
+        }
         uint next = cv_node_next(node);
         idx = next ? next : end;
     }

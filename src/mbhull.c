@@ -364,7 +364,12 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
     while (idx < end) {
         cv_node *node = cv_node_array_item(mb, idx);
         uint next = cv_node_next(node);
-        ncontours++;
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            ncontours++;
+            break;
+        }
         idx = next ? next : end;
     }
 
@@ -376,8 +381,13 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
         cv_node *node = cv_node_array_item(mb, idx);
         uint n = cv_hull_edge_count(mb, idx, end);
         uint next = cv_node_next(node);
-        nvertices += n;
-        vcount[contour++] = nvertices;
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            nvertices += n;
+            vcount[contour++] = nvertices;
+            break;
+        }
         idx = next ? next : end;
     }
 
@@ -401,7 +411,12 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
         CV_EDGE_LIST(mb,n,el,idx,end);
         cv_node *node = cv_node_array_item(mb, idx);
         uint next = cv_node_next(node);
-        hull_write_poly_vertices(state, el, n, f);
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            hull_write_poly_vertices(state, el, n, f);
+            break;
+        }
         idx = next ? next : end;
     }
 
@@ -411,8 +426,14 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
         CV_EDGE_LIST(mb,n,el,idx,end);
         cv_node *node = cv_node_array_item(mb, idx);
         uint attr = cv_node_attr(node), next = cv_node_next(node);
-        cv_hull_range p = cv_hull_split_contour(mb, el, n, idx, end, opts);
-        hull_write_poly_face(state, el, n, f, attr, p, vcount[contour++]);
+        cv_hull_range hr;
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            hr = cv_hull_split_contour(mb, el, n, idx, end, opts);
+            hull_write_poly_face(state, el, n, f, attr, hr, vcount[contour++]);
+            break;
+        }
         idx = next ? next : end;
     }
 
