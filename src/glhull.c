@@ -58,9 +58,11 @@ static int opt_rotate;
 static int opt_trace;
 static int opt_count;
 static int opt_edgelabels;
+static int opt_overlay;
 static float opt_zoom = 24.0f;
 static int opt_width = 512;
 static int opt_height = 512;
+static int opt_maxstep = 64;
 static char* opt_imagepath;
 static char* opt_fontpath;
 static char* opt_textpath;
@@ -322,110 +324,177 @@ static void hull_traverse_nodes(hull_state *state, vec2f o, float s,
 static float hull_px(vec2f o, float s, vec2f p) { return o.x + p.x * s; }
 static float hull_py(vec2f o, float s, vec2f p) { return o.y + p.y * s; }
 
-static int hull_convex_draw_contour(hull_state *state, vec2f *el, uint n,
-    uint idx, uint end, vec2f o, float x, cv_hull_range hr)
+static NVGcolor blue;
+static NVGcolor orange;
+static NVGcolor green;
+static NVGcolor red;
+static NVGcolor purple;
+static NVGcolor brown;
+static NVGcolor pink;
+static NVGcolor grey;
+static NVGcolor olive;
+static NVGcolor turquoise;
+static NVGcolor yellow;
+static NVGcolor white;
+static NVGcolor charcoal;
+
+static void hull_init_colors()
+{
+    blue = nvgRGB(0x1f,0x77,0xb4);
+    orange = nvgRGB(0xff,0x7f,0x0e);
+    green = nvgRGB(0x2c,0xa0,0x2c);
+    red = nvgRGB(0xd6,0x27,0x28);
+    purple = nvgRGB(0x94,0x67,0xbd);
+    brown = nvgRGB(0x8c,0x56,0x4b);
+    pink = nvgRGB(0xe3,0x77,0xc2);
+    grey = nvgRGB(0x7f,0x7f,0x7f);
+    olive = nvgRGB(0xbc,0xbd,0x22);
+    turquoise = nvgRGB(0x17,0xbe,0xcf);
+    yellow = nvgRGB(0xff,0xc0,0x00);
+    white = nvgRGB(0xd0,0xd0,0xd0);
+    charcoal = nvgRGB(0x20,0x20,0x20);
+
+}
+
+static int hull_draw_contour_base(hull_state *state, uint *il, uint n,
+    uint idx, vec2f o, float x, cv_hull_range hr)
 {
     cv_manifold *mb = state->mb;
     NVGcontext* vg = state->vg;
 
-    uint edge_idx = idx + 1;
-
-    int s, e, dir, split_idx;
-    if (hr.s < hr.e) {
-        s = hr.s, e = hr.s + n, split_idx = hr.e, dir = 1;
-    } else {
-        s = hr.e + n, e = hr.e, split_idx = hr.s, dir = -1;
-    }
-
-    int j0 = (s + n) % n;
-    vec2f p0 = el[j0];
-
-    NVGcolor blue = nvgRGB(0x1f,0x77,0xb4);
-    NVGcolor orange = nvgRGB(0xff,0x7f,0x0e);
-    NVGcolor green = nvgRGB(0x2c,0xa0,0x2c);
-    NVGcolor red = nvgRGB(0xd6,0x27,0x28);
-    NVGcolor purple = nvgRGB(0x94,0x67,0xbd);
-    NVGcolor brown = nvgRGB(0x8c,0x56,0x4b);
-    NVGcolor pink = nvgRGB(0xe3,0x77,0xc2);
-    NVGcolor grey = nvgRGB(0x7f,0x7f,0x7f);
-    NVGcolor olive = nvgRGB(0xbc,0xbd,0x22);
-    NVGcolor turquoise = nvgRGB(0x17,0xbe,0xcf);
-    NVGcolor yellow = nvgRGB(0xff,0xc0,0x00);
-    NVGcolor charcoal = nvgRGB(0x20,0x20,0x20);
+    int s = hr.s, e = hr.s < hr.e ? hr.e : hr.e+n;
 
     nvgStrokeWidth(vg, 3.0f);
     nvgLineJoin(vg, NVG_ROUND);
     nvgLineCap(vg, NVG_ROUND);
 
     nvgBeginPath(vg);
-    nvgMoveTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
-    for (int i = s; i != e; i += dir)
+    vec2f v0 = cv_edge_point(mb, il[s%n], 0);
+    nvgMoveTo(vg, hull_px(o,x,v0), hull_py(o,x,v0));
+    for (int i = s; i != e; i++)
     {
-        int i1 = (i + n + dir) % n;
-        vec2f v1 = el[i1];
+        vec2f v1 = cv_edge_point(mb, il[(i + n + 1)%n], 0);
         nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
     }
-    nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
-    nvgStrokeColor(vg, blue);
+    nvgLineTo(vg, hull_px(o,x,v0), hull_py(o,x,v0));
+    nvgStrokeColor(vg, grey);
     nvgStroke(vg);
 
-    nvgBeginPath(vg);
-    nvgMoveTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
-    for (int i = s; i != e && i != split_idx; i += dir)
-    {
-        int i1 = (i + n + dir) % n;
-        vec2f v1 = el[i1];
-        nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
-    }
-    nvgLineTo(vg, hull_px(o,x,p0), hull_py(o,x,p0));
-    nvgStrokeColor(vg, green);
-    nvgStroke(vg);
-
-    for (int i = s; i != e; i += dir)
-    {
-        int i1 = (i + n) % n;
-        int i2 = (i + n + dir) % n;
-        uint i0 = (dir == 1 ? i1 : i2);
-        vec2f v0 = el[i0];
-
-        char txt[16];
-        float bounds[4];
-
-        if (opt_edgelabels) {
-            snprintf(txt, sizeof(txt), "%d", edge_idx + i0);
-        } else {
-            snprintf(txt, sizeof(txt), "%d", i0);
-        }
-        nvgFontSize(vg, 12.0f);
-        nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
-        nvgTextBounds(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL, bounds);
+    for (int i = s; i <= e; i++) {
+        uint pc = cv_edge_point_count(mb, il[(i + n)%n]);
+        if (pc < 3) continue;
+        vec2f v0 = cv_edge_point(mb, il[(i + n)%n], 0);
         nvgBeginPath(vg);
-        nvgFillColor(vg, (i0 % n) == 0 ? pink : yellow);
-        nvgRoundedRect(vg, (int)bounds[0]-4,
-                           (int)bounds[1]-2,
-                           (int)(bounds[2]-bounds[0])+8,
-                           (int)(bounds[3]-bounds[1])+4,
-                           ((int)(bounds[3]-bounds[1])+4)/2-1);
-        nvgFill(vg);
-        nvgFillColor(vg, charcoal);
-        nvgText(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL);
+        nvgMoveTo(vg, hull_px(o,x,v0), hull_py(o,x,v0));
+        for (int j = 1; j < pc; j++) {
+            vec2f v1 = cv_edge_point(mb, il[(i + n)%n], j);
+            nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
+        }
+        nvgStrokeColor(vg, grey);
+        nvgStroke(vg);
     }
 }
 
-static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
+static int hull_draw_contour_poly(hull_state *state, uint *pl, uint n,
+    uint idx, vec2f o, float x, cv_hull_range hr)
+{
+    cv_manifold *mb = state->mb;
+    NVGcontext* vg = state->vg;
+
+    int s = hr.s, e = hr.s < hr.e ? hr.e : hr.e+n;
+
+    nvgStrokeWidth(vg, 3.0f);
+    nvgLineJoin(vg, NVG_ROUND);
+    nvgLineCap(vg, NVG_ROUND);
+
+    nvgBeginPath(vg);
+    vec2f v0 = cv_point_get(mb, pl[s%n]);
+    nvgMoveTo(vg, hull_px(o,x,v0), hull_py(o,x,v0));
+    for (int i = s; i != e; i++)
+    {
+        vec2f v1 = cv_point_get(mb, pl[(i + n + 1)%n]);
+        nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
+    }
+    nvgLineTo(vg, hull_px(o,x,v0), hull_py(o,x,v0));
+    nvgStrokeColor(vg, blue);
+    nvgStroke(vg);
+}
+
+static int hull_draw_contour_labels(hull_state *state, uint *il, uint n,
+    uint idx, vec2f o, float x, cv_hull_range hr)
+{
+    cv_manifold *mb = state->mb;
+    NVGcontext* vg = state->vg;
+
+    int s = hr.s, e = hr.s < hr.e ? hr.e : hr.e+n;
+
+    for (int i = s; i <= e; i++)
+    {
+        uint pc = cv_edge_point_count(mb, il[(i + n)%n]);
+        for (int j = 0; j < pc-1; j++)
+        {
+            int i1 = (i + n) % n;
+            cv_node *edge_node = cv_node_array_item(mb, il[i1]);
+            uint p = cv_node_offset(edge_node) + j;
+            vec2f v0 = cv_point_array_item(mb, p)->v;
+            char txt[16];
+            float bounds[4];
+            if (opt_edgelabels) {
+                snprintf(txt, sizeof(txt), "%d", p);
+            } else {
+                snprintf(txt, sizeof(txt), "%d%c", i1, 'a' + j);
+            }
+            nvgFontSize(vg, 15.0f);
+            nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
+            nvgTextBounds(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL, bounds);
+            nvgBeginPath(vg);
+            nvgFillColor(vg, yellow);
+            nvgRoundedRect(vg, (int)bounds[0]-4,
+                               (int)bounds[1]-2,
+                               (int)(bounds[2]-bounds[0])+8,
+                               (int)(bounds[3]-bounds[1])+4,
+                               ((int)(bounds[3]-bounds[1])+4)/2-1);
+            nvgFill(vg);
+            nvgFillColor(vg, charcoal);
+            nvgText(vg, hull_px(o,x,v0), hull_py(o,x,v0), txt, NULL);
+        }
+    }
+}
+
+static int hull_transform_contours(hull_state* state, vec2f o, float s,
     uint idx, uint end, uint opts)
 {
     cv_manifold *mb = state->mb;
     while (idx < end) {
-        CV_EDGE_LIST(mb,n,el,idx,end);
+        uint w = cv_edge_list_count(mb,idx,end);
+        uint *il = (uint*)alloca(sizeof(uint) * w);
+        cv_edge_list_enum(mb,il,idx,end);
+        uint n = cv_point_list_count(mb, idx, end);
+        uint *pl = (uint*)alloca(sizeof(uint) * n);
+        cv_point_list_enum(mb,pl,idx,end);
         cv_node *node = cv_node_array_item(mb, idx);
         cv_trace("hull_transform_contours: %s_%u\n", cv_node_type_name(node), idx);
-        cv_hull_range hr;
+        cv_hull_range fr = { w, 0, w-1 };
+        cv_hull_range hr, ir = { n, 0, n-1 };
+        uint *tpl, *mpl = (uint*)alloca(sizeof(vec2f)*n);
+        array_buffer result;
+        int u, m;
         switch(cv_node_attr(node)) {
         case cv_contour_cw:
         case cv_contour_ccw:
-            hr = cv_hull_split_contour(state->mb, el, n, idx, end, opts);
-            hull_convex_draw_contour(state, el, n, idx, end, o, s, hr);
+            hull_draw_contour_base(state, il, w, idx, o, s, fr);
+            result = cv_hull_split_contour_loop(state->mb, idx, end, opts,
+                opt_maxstep);
+            for (int i = 0; i < array_buffer_count(&result); i++) {
+                hr = ((cv_hull_range*)array_buffer_data(&result))[i];
+                ir = cv_hull_invert(hr);
+                hull_draw_contour_poly(state, pl, n, idx, o, s, hr);
+                cv_point_list_moduli(pl, mpl, &m, ir, 0, 0);
+                tpl = pl; pl = mpl; mpl = tpl;
+                u   = n;  n  = m;   m = u;
+            }
+            array_buffer_destroy(&result);
+            hull_draw_contour_labels(state, il, w, idx, o, s, fr);
             break;
         }
         uint next = cv_node_next(node);
@@ -434,7 +503,7 @@ static int hull_convex_transform_contours(hull_state* state, vec2f o, float s,
     return 0;
 }
 
-static int hull_convex_transform_shapes(hull_state* state, vec2f o, float s,
+static int hull_transform_shapes(hull_state* state, vec2f o, float s,
     uint idx, uint end, uint opts)
 {
     cv_manifold *mb = state->mb;
@@ -445,12 +514,32 @@ static int hull_convex_transform_shapes(hull_state* state, vec2f o, float s,
         uint next = cv_node_next(node);
         uint contour_idx = idx + 1, contour_end = next ? next : end;
         if (contour_idx < contour_end) {
-            hull_convex_transform_contours(state, o, s,
+            hull_transform_contours(state, o, s,
                 contour_idx, contour_end, opts);
         }
         idx = next ? next : end;
     }
     return 0;
+}
+
+static void circle_text(NVGcontext *vg, const char* txt, float x, float y, float fs)
+{
+    float bounds[4];
+
+    nvgFontSize(vg, fs);
+    nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
+    nvgTextBounds(vg, x, y, txt, NULL, bounds);
+    nvgBeginPath(vg);
+    nvgFillColor(vg, blue);
+    nvgRoundedRect(vg, (int)bounds[0]-4,
+                       (int)bounds[1]-2,
+                       (int)(bounds[2]-bounds[0])+8,
+                       (int)(bounds[3]-bounds[1])+4,
+                       ((int)(bounds[3]-bounds[1])+4)/2-1);
+    nvgFill(vg);
+    nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
+    nvgFillColor(vg, white);
+    nvgText(vg, x, y, txt, NULL);
 }
 
 void hull_render(hull_state* state, int cp, int trace, float w, float h)
@@ -477,8 +566,31 @@ void hull_render(hull_state* state, int cp, int trace, float w, float h)
         hull_path_winding(state);
         cv_draw_fill(vg);
     }
-    hull_convex_transform_shapes(state, o, s, g->shape, end, trace);
+    hull_transform_shapes(state, o, s, g->shape, end, trace);
     nvgRestore(vg);
+
+    if (opt_overlay)
+    {
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
+        char txt[16];
+        snprintf(txt, sizeof(txt), "%d", opt_maxstep);
+        circle_text(vg, txt, 120, 30, 15.f);
+        snprintf(txt, sizeof(txt), "%s", opt_epsilon ? "on" : "off");
+        circle_text(vg, txt, 120, 50, 15.f);
+        nvgFillColor(vg, charcoal);
+        nvgText(vg, 90, 30, "depth", NULL);
+        nvgText(vg, 90, 50, "epsilon", NULL);
+        nvgTextAlign(vg, NVG_ALIGN_LEFT|NVG_ALIGN_MIDDLE);
+        nvgText(vg, 30, h-90, "up/down = depth", NULL);
+        nvgText(vg, 30, h-70, "^D = direction", NULL);
+        nvgText(vg, 30, h-50, "^E = labels", NULL);
+        nvgText(vg, 30, h-30, "^L = logging", NULL);
+        nvgTextAlign(vg, NVG_ALIGN_RIGHT|NVG_ALIGN_MIDDLE);
+        nvgText(vg, w-30, h-90, "left/right = pos", NULL);
+        nvgText(vg, w-30, h-70, "^F = epsilon", NULL);
+        nvgText(vg, w-30, h-50, "^O = overlay", NULL);
+        nvgText(vg, w-30, h-30, "^T = tracing", NULL);
+    }
 }
 
 static int keycode_to_char(int key, int mods)
@@ -540,29 +652,51 @@ static void key(GLFWwindow* window, int key, int scancode, int action, int mods)
     NVG_NOTUSED(mods);
 
     hull_state *state = (hull_state*)glfwGetWindowUserPointer(window);
-    cv_ll_oneshot++;
 
     int c;
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         glfwSetWindowShouldClose(window, GL_TRUE);
     } else if ((c = keycode_to_char(key, mods)) != 0 && action == GLFW_PRESS) {
         opt_glyph = c;
+        cv_ll_oneshot++;
     } else if (key == GLFW_KEY_D && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
         switch (opt_trace) {
         case cv_hull_transform_reverse: opt_trace = cv_hull_transform_forward; break;
         case cv_hull_transform_forward: opt_trace = cv_hull_transform_reverse; break;
         }
+        cv_ll_oneshot++;
     } else if (key == GLFW_KEY_E && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
         opt_edgelabels = !opt_edgelabels;
+        cv_ll_oneshot++;
+    } else if (key == GLFW_KEY_F && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
+        opt_epsilon = !opt_epsilon;
+        cv_ll_oneshot++;
+    } else if (key == GLFW_KEY_O && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
+        opt_overlay = !opt_overlay;
+        cv_ll_oneshot++;
+    } else if (key == GLFW_KEY_L && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
+        cv_ll = (cv_ll != cv_ll_trace) ? cv_ll_trace : cv_ll_info;
+        cv_ll_oneshot++;
+    } else if (key == GLFW_KEY_T && action == GLFW_PRESS && mods == GLFW_MOD_CONTROL) {
+        opt_tracing = !opt_tracing;
+        cv_ll_oneshot++;
+    } else if (key == GLFW_KEY_UP && action == GLFW_PRESS && mods == 0) {
+        opt_maxstep++;
+        cv_ll_oneshot++;
+    } else if (key == GLFW_KEY_DOWN && action == GLFW_PRESS && mods == 0) {
+        if (opt_maxstep > 0) opt_maxstep--;
+        cv_ll_oneshot++;
     } else if (key == GLFW_KEY_RIGHT && action == GLFW_PRESS && mods == 0) {
         uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
         cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
         uint num_edges = hull_max_edges(state, g->shape);
         cv_hull_rotate(state->mb, g->shape, num_edges-1);
+        cv_ll_oneshot++;
     } else if (key == GLFW_KEY_LEFT && action == GLFW_PRESS && mods == 0) {
         uint glyph = cv_lookup_glyph(state->mb, opt_glyph);
         cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
         cv_hull_rotate(state->mb, g->shape, 1);
+        cv_ll_oneshot++;
     }
 }
 
@@ -765,9 +899,11 @@ static void print_help(int argc, char **argv)
         "  -ds, --dump-stats                  dump stats\n"
         "  -dg, --dump-graph                  dump graph\n"
         "  -e, --edge-labels                  edge labels\n"
+        "  -o, --overlay                      info overlay\n"
         "  -z, --zoom <float>                 buffer zoom\n"
         "  -w, --width <int>                  buffer width\n"
         "  -h, --height <int>                 buffer height\n"
+        "  -s, --max-step <int>               max steps\n"
         "  -h, --help                         command line help\n",
         argv[0]
     );
@@ -849,6 +985,9 @@ static void parse_options(int argc, char **argv)
         } else if (match_opt(argv[i], "-e", "--edge-labels")) {
             opt_edgelabels++;
             i++;
+        } else if (match_opt(argv[i], "-o", "--overlay")) {
+            opt_overlay++;
+            i++;
         } else if (match_opt(argv[i], "-z", "--zoom")) {
             opt_zoom = (float)atof(argv[++i]);
             i++;
@@ -857,6 +996,9 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-h", "--height")) {
             opt_height = atoi(argv[++i]);
+            i++;
+        } else if (match_opt(argv[i], "-s", "--max-step")) {
+            opt_maxstep = atoi(argv[++i]);
             i++;
         } else {
             cv_error("error: unknown option: %s\n", argv[i]);
@@ -948,6 +1090,7 @@ void glhull_app(int argc, char **argv)
     glDisable(GL_DEPTH_TEST);
     glClearColor(0.8f, 0.8f, 0.8f, 1.0f);
 
+    hull_init_colors();
     hull_vg_init(&state);
 
     if (opt_imagepath) {
@@ -968,7 +1111,7 @@ void glhull_app(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    cv_ll = cv_ll_debug;
+    cv_ll = cv_ll_info;
     parse_options(argc, argv);
     glhull_app(argc, argv);
     return 0;

@@ -36,6 +36,7 @@ static int opt_glyph_e;
 static int opt_rotate;
 static int opt_trace;
 static int opt_count;
+static int opt_maxstep = 64;
 static int opt_gpu;
 static char* opt_polypath;
 static char* opt_fontpath;
@@ -293,6 +294,9 @@ static void parse_options(int argc, char **argv)
         } else if (match_opt(argv[i], "-dg", "--dump-graph")) {
             opt_dump |= opt_dump_graph;
             i++;
+        } else if (match_opt(argv[i], "-s", "--max-step")) {
+            opt_maxstep = atoi(argv[++i]);
+            i++;
         } else if (match_opt(argv[i], "-tg", "--test-gpu")) {
             opt_gpu++;
             i++;
@@ -331,25 +335,26 @@ static void hull_write_poly_header(hull_state *state, FILE *f,
     fprintf(f, "end_header\n");
 }
 
-static void hull_write_poly_vertices(hull_state *state, vec2f *el, uint n,
+static void hull_write_poly_vertices(hull_state *state, uint *pl, uint n,
     FILE *f)
 {
     for (uint i = 0; i < n; i++) {
-        fprintf(f, "%f %f\n", el[i].x, el[i].y);
+        vec2f p = cv_point_get(state->mb, pl[i]);
+        fprintf(f, "%f %f\n", p.x, p.y);
     }
 }
 
-static void hull_write_poly_face(hull_state *state, vec2f *el, uint n,
-    FILE *f, uint attr, cv_hull_range p, uint idx_offset)
+static void hull_write_poly_face(hull_state *state, uint *pl,
+    FILE *f, uint attr, cv_hull_range p, uint contour_idx)
 {
-    if (p.e < p.s) p.e += n;
+    if (p.e < p.s) p.e += p.n;
     fprintf(f, "%d", p.e - p.s + 1);
     switch(attr) {
     case cv_contour_cw:
-        for (int i=p.e; i >= p.s; i--) fprintf(f, " %d", idx_offset + (i%n));
+        for (int i=p.e; i >= p.s; i--) fprintf(f, " %d", pl[i%p.n]);
         break;
     case cv_contour_ccw:
-        for (int i=p.s; i <= p.e; i++) fprintf(f, " %d", idx_offset + (i%n));
+        for (int i=p.s; i <= p.e; i++) fprintf(f, " %d", pl[i%p.n]);
         break;
     }
     fprintf(f, "\n");
@@ -379,13 +384,37 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
     vcount[contour++] = 0;
     while (idx < end) {
         cv_node *node = cv_node_array_item(mb, idx);
-        uint n = cv_hull_edge_count(mb, idx, end);
+        uint n = cv_point_list_count(mb, idx, end);
         uint next = cv_node_next(node);
         switch(cv_node_attr(node)) {
         case cv_contour_cw:
         case cv_contour_ccw:
             nvertices += n;
             vcount[contour++] = nvertices;
+            break;
+        }
+        idx = next ? next : end;
+    }
+
+    /* count convex hulls */
+    uint nconvex = 0;
+    idx = cidx, contour = 0;
+    array_buffer spans;
+    array_buffer_init(&spans, sizeof(array_buffer), 16);
+    while (idx < end) {
+        uint n = cv_point_list_count(mb,idx,end);
+        uint *pl = (uint*)alloca(sizeof(uint) * n);
+        cv_point_list_enum(mb,pl,idx,end);
+        cv_node *node = cv_node_array_item(mb, idx);
+        uint attr = cv_node_attr(node), next = cv_node_next(node);
+        array_buffer result;
+        switch(cv_node_attr(node)) {
+        case cv_contour_cw:
+        case cv_contour_ccw:
+            result = cv_hull_split_contour_loop(state->mb, idx, end,
+                opts, opt_maxstep);
+            nconvex += array_buffer_count(&result);
+            array_buffer_add(&spans, &result);
             break;
         }
         idx = next ? next : end;
@@ -403,18 +432,20 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
 
     /* write poly header */
     hull_write_poly_header(state, f, state->batch_cp, state->batch_rot, opts,
-        nvertices, ncontours);
+        nvertices, nconvex);
 
     /* write poly vertices */
     idx = cidx, contour = 0;
     while (idx < end) {
-        CV_EDGE_LIST(mb,n,el,idx,end);
+        uint n = cv_point_list_count(mb,idx,end);
+        uint *pl = (uint*)alloca(sizeof(uint) * n);
+        cv_point_list_enum(mb,pl,idx,end);
         cv_node *node = cv_node_array_item(mb, idx);
         uint next = cv_node_next(node);
         switch(cv_node_attr(node)) {
         case cv_contour_cw:
         case cv_contour_ccw:
-            hull_write_poly_vertices(state, el, n, f);
+            hull_write_poly_vertices(state, pl, n, f);
             break;
         }
         idx = next ? next : end;
@@ -423,19 +454,39 @@ static int hull_transform_contours(hull_state *state, uint cidx, uint end, uint 
     /* write poly edges */
     idx = cidx, contour = 0;
     while (idx < end) {
-        CV_EDGE_LIST(mb,n,el,idx,end);
+        uint n = cv_point_list_count(mb,idx,end);
+        uint *pl = (uint*)alloca(sizeof(uint) * n);
+        for (size_t i = 0; i < n; i++) {
+            pl[i] = vcount[contour] + i;
+        }
         cv_node *node = cv_node_array_item(mb, idx);
         uint attr = cv_node_attr(node), next = cv_node_next(node);
-        cv_hull_range hr;
+        array_buffer result;
+        cv_hull_range hr, ir;
+        uint *tpl, *mpl = (uint*)alloca(sizeof(vec2f)*n);
+        int u, m;
         switch(cv_node_attr(node)) {
         case cv_contour_cw:
         case cv_contour_ccw:
-            hr = cv_hull_split_contour(mb, el, n, idx, end, opts);
-            hull_write_poly_face(state, el, n, f, attr, hr, vcount[contour++]);
+            result = ((array_buffer*)array_buffer_data(&spans))[contour];
+            for (int i = 0; i < array_buffer_count(&result); i++) {
+                hr = ((cv_hull_range*)array_buffer_data(&result))[i];
+                ir = cv_hull_invert(hr);
+                hull_write_poly_face(state, pl, f, attr, hr, idx);
+                cv_point_list_moduli(pl, mpl, &m, ir, 0, 0);
+                tpl = pl; pl = mpl; mpl = tpl;
+                u   = n;  n  = m;   m = u;
+            }
+            contour++;
             break;
         }
         idx = next ? next : end;
     }
+
+    for (int i = 0; i < array_buffer_count(&spans); i++) {
+        array_buffer_destroy((array_buffer*)array_buffer_data(&spans) + i);
+    }
+    array_buffer_destroy(&spans);
 
     if (f != stdout) fclose(f);
 
@@ -550,7 +601,7 @@ static void mbhull_app(int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    cv_ll = cv_ll_debug;
+    cv_ll = cv_ll_info;
     parse_options(argc, argv);
     mbhull_app(argc, argv);
     exit(0);
