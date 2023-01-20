@@ -77,13 +77,14 @@ class Polygon:
 
     def check(self):
         debug = False
-        convex = True
         nfaces = len(self.faces)
+        nonconvex = []
         for f in range(0,nfaces):
             face = self.faces[f]
             nedges = len(face)
             if debug:
                 print('face_%d nedges=%d' % (f, nedges))
+            convex = True
             for i in range(0,nedges):
                 i0 = face[(i+0)%nedges]
                 i1 = face[(i+1)%nedges]
@@ -97,7 +98,13 @@ class Polygon:
                 if debug:
                     print("(%7.3f,%7.3f) (%7.3f,%7.3f) %7.3f" % (a[0], a[1], b[0], b[1], z))
                 convex = convex if z >= 0 else False
-        return convex
+            if not convex:
+                nonconvex.append(f+1)
+        if len(nonconvex) > 0:
+            return ("%d of %d faces (%s) non-convex" %
+                (len(nonconvex), nfaces, ','.join(str(x) for x in nonconvex)))
+        else:
+            return None
 
 parser = argparse.ArgumentParser(description='runs glhull tests')
 parser.add_argument('-l', '--level', default=Level.INFO,
@@ -157,11 +164,12 @@ def check_row(tmpl, s, c, k, dir, font):
         if not os.path.exists(poly_file):
             continue
         ply = Polygon(poly_file)
-        if ply.check():
+        errmsg = ply.check()
+        if not errmsg:
             num_pass = num_pass + 1
         else:
-            print('font %s non convex codepoint %d rotation %d direction %s'
-                % (basename_noext(font), c, r, dir))
+            print('font=\'%s\' codepoint=%d rotation=%d direction=%s message=\"%s\"'
+                % (os.path.basename(font), c, r, dir, errmsg))
             num_fail = num_fail + 1
         os.unlink(poly_file)
     return num_pass, num_fail
