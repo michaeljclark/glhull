@@ -967,24 +967,8 @@ static int cv_hull_trace_contour(cv_manifold* mb, uint *pl, int n,
     for (; i != e && split_idx != -1; i += dir)
     {
         int i1 = (i + n) % n;
-        int i2 = (i + n + dir) % n;
-        int i3 = (i + n + dir + dir) % n;
 
         vec2f v1 = cv_point_get(mb, pl[i1]);
-        vec2f v2 = cv_point_get(mb, pl[i2]);
-        vec2f v3 = cv_point_get(mb, pl[i3]);
-
-        vec2f a = (vec2f) { v2.x - v1.x, v2.y - v1.y }; /* curr */
-        vec2f b = (vec2f) { v3.x - v2.x, v3.y - v2.y }; /* next */
-        vec2f c = (vec2f) { p0.x - v3.x, p0.y - v3.y }; /* close */
-
-        float ab = vec2f_cross(a, b); /* cross of curr->next */
-        float bc = vec2f_cross(b, c); /* cross of next->close */
-        float cd = vec2f_cross(c, d); /* cross of close->first */
-
-        int ab_w = cv_extract_sign(ab); /* winding of curr->next */
-        int bc_w = cv_extract_sign(bc); /* winding of next->close */
-        int cd_w = cv_extract_sign(cd); /* winding of close->first */
 
         /* walk backwards from the convex split point reducing the
          * size of the hull until the current point is not inside it */
@@ -1049,10 +1033,6 @@ static int cv_hull_trace_contour(cv_manifold* mb, uint *pl, int n,
             new_split_idx = split_idx - dir;
         } while (inside && new_split_idx != s);
 
-        if (cv_ll <= cv_ll_debug) {
-            cv_hull_point_debug_row(mb, pl, n, i, split_idx,
-                a, b, c, d, ab, bc, cd);
-        }
     }
 
     return split_idx;
