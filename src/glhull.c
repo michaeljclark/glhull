@@ -396,7 +396,7 @@ static int hull_draw_contour_base(hull_state *state, uint *il, uint n,
 }
 
 static int hull_draw_contour_poly(hull_state *state, uint *pl, uint n,
-    uint idx, vec2f o, float x, cv_hull_range hr)
+    uint idx, vec2f o, float x, cv_hull_range hr, NVGcolor sc, NVGcolor fc)
 {
     cv_manifold *mb = state->mb;
     NVGcontext* vg = state->vg;
@@ -416,8 +416,10 @@ static int hull_draw_contour_poly(hull_state *state, uint *pl, uint n,
         nvgLineTo(vg, hull_px(o,x,v1), hull_py(o,x,v1));
     }
     nvgLineTo(vg, hull_px(o,x,v0), hull_py(o,x,v0));
-    nvgStrokeColor(vg, blue);
+    nvgStrokeColor(vg, sc);
     nvgStroke(vg);
+    nvgFillColor(vg, fc);
+    nvgFill(vg);
 }
 
 static int hull_draw_contour_labels(hull_state *state, uint *il, uint n,
@@ -483,12 +485,15 @@ static int hull_transform_contours(hull_state* state, vec2f o, float s,
         case cv_contour_cw:
         case cv_contour_ccw:
             hull_draw_contour_base(state, il, w, idx, o, s, fr);
+            hull_draw_contour_poly(state, pl, n, idx, o, s, ir,
+                green, nvgTransRGBA(grey,0x10));
             result = cv_hull_split_contour_loop(state->mb, idx, end, opts,
                 opt_maxstep);
             for (int i = 0; i < array_buffer_count(&result); i++) {
                 hr = ((cv_hull_range*)array_buffer_data(&result))[i];
                 ir = cv_hull_invert(hr);
-                hull_draw_contour_poly(state, pl, n, idx, o, s, hr);
+                hull_draw_contour_poly(state, pl, n, idx, o, s, hr,
+                    blue, nvgTransRGBA(blue,0x10));
                 cv_point_list_moduli(pl, mpl, &m, ir, 0, 0);
                 tpl = pl; pl = mpl; mpl = tpl;
                 u   = n;  n  = m;   m = u;
