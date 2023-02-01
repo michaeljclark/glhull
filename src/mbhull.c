@@ -37,6 +37,7 @@ static int opt_rotate;
 static int opt_trace;
 static int opt_count;
 static int opt_maxstep = 64;
+static int opt_exec = 1;
 static int opt_gpu;
 static char* opt_polypath;
 static char* opt_fontpath;
@@ -184,6 +185,7 @@ static void print_help(int argc, char **argv)
         "  -ds, --dump-stats                  dump stats\n"
         "  -dg, --dump-graph                  dump graph\n"
         "  -tg, --test-gpu                    test gpu\n"
+        "  -n, --no-exec                      skip transform\n"
         "  -h, --help                         command line help\n",
         argv[0]
     );
@@ -267,6 +269,9 @@ static void parse_options(int argc, char **argv)
             i++;
         } else if (match_opt(argv[i], "-tg", "--test-gpu")) {
             opt_gpu++;
+            i++;
+        } else if (match_opt(argv[i], "-n", "--no-exec")) {
+            opt_exec = 0;
             i++;
         } else {
             cv_error("error: unknown option: %s\n", argv[i]);
@@ -552,10 +557,12 @@ static void mbhull_app(int argc, char **argv)
         cv_dump_graph(state.mb);
     }
 
-    if (opt_polypath) {
-        hull_batch(&state);
-    } else {
-        hull_main(&state);
+    if (opt_exec) {
+        if (opt_polypath) {
+            hull_batch(&state);
+        } else {
+            hull_main(&state);
+        }
     }
 
     if (opt_gpu > 0) {
