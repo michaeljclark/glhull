@@ -59,38 +59,6 @@ struct hull_state
     FT_Face ftface;
 };
 
-static int hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth, void *userdata)
-{
-    hull_state *state = (hull_state*)userdata;
-    cv_node *node = cv_node_array_item(ctx, idx);
-    uint type = cv_node_type(node);
-    switch (type) {
-    case cv_type_2d_shape:
-        break;
-    case cv_type_2d_contour:
-        state->max_edges = cv_max(state->max_edges, state->edge_count);
-        state->edge_count = 0;
-        break;
-    case cv_type_2d_edge_linear:
-    case cv_type_2d_edge_conic:
-    case cv_type_2d_edge_cubic:
-        state->edge_count++;
-        break;
-    }
-    return 1;
-}
-
-static uint hull_max_edges(hull_state* state, uint idx)
-{
-    cv_node *node = cv_node_array_item(state->mb, idx);
-    uint end = cv_node_next(node) ? cv_node_next(node)
-                                  : array_buffer_count(&state->mb->nodes);
-    state->max_edges = state->edge_count = 0;
-    cv_traverse_nodes(state->mb, idx, end, 0, state, hull_count_edges);
-    state->max_edges = cv_max(state->max_edges, state->edge_count);
-    return state->max_edges;
-}
-
 /*
  * manifold compute shader
  */
@@ -525,7 +493,7 @@ static void hull_batch(hull_state *state)
         state->batch_cp = cp;
         uint glyph = cv_lookup_glyph(state->mb, cp);
         cv_glyph *g = cv_glyph_array_item(state->mb, glyph);
-        int max_edges = hull_max_edges(state, g->shape);
+        int max_edges = cv_hull_max_edges(state->mb, g->shape);
         for (int r = 0; r < max_edges; r++)
         {
             state->batch_rot = r;
@@ -561,7 +529,7 @@ static void mbhull_app(int argc, char **argv)
         cv_dump_graph(state.mb);
         uint glyph = cv_lookup_glyph(state.mb, opt_glyph);
         cv_glyph *g = cv_glyph_array_item(state.mb, glyph);
-        printf("%d\n", hull_max_edges(&state, g->shape));
+        printf("%d\n", cv_hull_max_edges(state.mb, g->shape));
         hull_graph_destroy(&state);
         exit(0);
     }

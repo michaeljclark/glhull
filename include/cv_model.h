@@ -82,6 +82,9 @@ struct cv_manifold
     uint edge;
     uint point;
 
+    uint max_edges;
+    uint edge_count;
+
     float contour_area;
     vec2f contour_min;
     vec2f contour_max;
@@ -442,6 +445,42 @@ static void cv_dump_stats(cv_manifold *ctx)
         array_buffer_size(&ctx->glyphs),
         array_buffer_size(&ctx->nodes),
         array_buffer_size(&ctx->points));
+}
+
+
+/*
+ * hull edge counting
+ */
+
+static int cv_hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth, void *userdata)
+{
+    cv_node *node = cv_node_array_item(ctx, idx);
+    uint type = cv_node_type(node);
+    switch (type) {
+    case cv_type_2d_shape:
+        break;
+    case cv_type_2d_contour:
+        ctx->max_edges = cv_max(ctx->max_edges, ctx->edge_count);
+        ctx->edge_count = 0;
+        break;
+    case cv_type_2d_edge_linear:
+    case cv_type_2d_edge_conic:
+    case cv_type_2d_edge_cubic:
+        ctx->edge_count++;
+        break;
+    }
+    return 1;
+}
+
+static uint cv_hull_max_edges(cv_manifold* ctx, uint idx)
+{
+    cv_node *node = cv_node_array_item(ctx, idx);
+    uint end = cv_node_next(node) ? cv_node_next(node)
+                                  : array_buffer_count(&ctx->nodes);
+    ctx->max_edges = ctx->edge_count = 0;
+    cv_traverse_nodes(ctx, idx, end, 0, NULL, cv_hull_count_edges);
+    ctx->max_edges = cv_max(ctx->max_edges, ctx->edge_count);
+    return ctx->max_edges;
 }
 
 /*
