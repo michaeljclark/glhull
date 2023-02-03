@@ -1107,7 +1107,17 @@ static uint cv_edge_point_count(cv_manifold *ctx, uint idx)
     return cv_point_count(cv_node_type(edge_node));
 }
 
-static void cv_interior_hull(cv_manifold *mb, uint *pl, uint *m, uint idx, uint end)
+typedef enum cv_hull_bound cv_hull_bound;
+enum cv_hull_bound
+{
+    cv_hull_interior,
+    cv_hull_exterior
+};
+
+static void cv_linear_bounding_hull(cv_manifold *mb,
+                                    uint *pl, uint *m,
+                                    uint idx, uint end,
+                                    cv_hull_bound bound)
 {
     vec2f v1, v2, v3, a, b, c, l = { 0.f };
     float xla, dla, la, xlb, dlb, lb, xbc, dbc, bc;
@@ -1160,7 +1170,12 @@ static void cv_interior_hull(cv_manifold *mb, uint *pl, uint *m, uint idx, uint 
 
             if (i != n-1)
             {
-                if (la > lb) {
+                int cond;
+                switch (bound) {
+                case cv_hull_interior: cond = la > lb; break;
+                case cv_hull_exterior: cond = la < lb; break;
+                }
+                if (cond) {
                     if (pl) {
                         pl[npoints + 0] = p + 0;
                         pl[npoints + 1] = p + 1;
@@ -1175,7 +1190,12 @@ static void cv_interior_hull(cv_manifold *mb, uint *pl, uint *m, uint idx, uint 
                     l = b;
                 }
             } else {
-                if (bc > 0) {
+                int cond;
+                switch (bound) {
+                case cv_hull_interior: cond = bc > 0; break;
+                case cv_hull_exterior: cond = bc < 0; break;
+                }
+                if (cond) {
                     l = c;
                 } else {
                     l = b;
@@ -1233,13 +1253,13 @@ static void cv_edge_list_enum(cv_manifold *mb, uint *il, uint idx, uint end)
 static uint cv_point_list_count(cv_manifold *mb, uint idx, uint end)
 {
     uint n;
-    cv_interior_hull(mb, NULL, &n, idx, end);
+    cv_linear_bounding_hull(mb, NULL, &n, idx, end, cv_hull_interior);
     return n;
 }
 
 static void cv_point_list_enum(cv_manifold *mb, uint *pl, uint idx, uint end)
 {
-    cv_interior_hull(mb, pl, NULL, idx, end);
+    cv_linear_bounding_hull(mb, pl, NULL, idx, end, cv_hull_interior);
 }
 
 static cv_hull_range cv_hull_split_contour(cv_manifold *mb, uint *pl, uint n,
