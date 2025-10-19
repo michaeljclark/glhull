@@ -18,11 +18,18 @@ static cv_log_level cv_ll = cv_ll_info;
  * manifold buffer object model
  */
 
-#define cv_type_2d_shape       0
-#define cv_type_2d_contour     1
-#define cv_type_2d_edge_linear 2
-#define cv_type_2d_edge_conic  3
-#define cv_type_2d_edge_cubic  4
+#define cv_type_2d_shape          0
+#define cv_type_2d_contour        1
+#define cv_type_2d_edge_linear    2
+#define cv_type_2d_edge_conic     3
+#define cv_type_2d_edge_cubic     4
+#define cv_type_2d_edge_lconic02  5   /* conic edge as linear */
+#define cv_type_2d_edge_lcubic03  6   /* cubic edge as linear */
+#define cv_type_2d_edge_rlinear   7   /* linear edge in reverse */
+#define cv_type_2d_edge_rconic    8   /* conic edge in reverse */
+#define cv_type_2d_edge_rcubic    9   /* cubic edge in reverse */
+#define cv_type_2d_edge_rlconic20 10  /* conic edge as linear in reverse */
+#define cv_type_2d_edge_rlcubic30 11  /* cubic edge as linear in reverse */
 
 #define cv_contour_zero     0
 #define cv_contour_ccw      1
@@ -153,6 +160,13 @@ static uint cv_point_count(uint type)
     case cv_type_2d_edge_linear: return 2;
     case cv_type_2d_edge_conic: return 3;
     case cv_type_2d_edge_cubic: return 4;
+    case cv_type_2d_edge_lconic02: return 3;
+    case cv_type_2d_edge_lcubic03: return 4;
+    case cv_type_2d_edge_rlinear: return 2;
+    case cv_type_2d_edge_rconic: return 3;
+    case cv_type_2d_edge_rcubic: return 4;
+    case cv_type_2d_edge_rlconic20: return 3;
+    case cv_type_2d_edge_rlcubic30: return 4;
     default: break;
     }
     return 0;
@@ -164,8 +178,15 @@ static const char* cv_node_type_name(cv_node *node)
     case cv_type_2d_shape: return "Shape2D";
     case cv_type_2d_contour: return "Contour2D";
     case cv_type_2d_edge_linear: return "EdgeLinear2D";
-    case cv_type_2d_edge_conic: return "EdgeQuadratic2D";
+    case cv_type_2d_edge_conic: return "EdgeQuad2D";
     case cv_type_2d_edge_cubic: return "EdgeCubic2D";
+    case cv_type_2d_edge_lconic02: return "EdgeLin02Quad2D";
+    case cv_type_2d_edge_lcubic03: return "EdgeLin03Cubic2D";
+    case cv_type_2d_edge_rlinear: return "EdgeRevLinear2D";
+    case cv_type_2d_edge_rconic: return "EdgeRevQuad2D";
+    case cv_type_2d_edge_rcubic: return "EdgeRevCubic2D";
+    case cv_type_2d_edge_rlconic20: return "EdgeRevLin02Quad2D";
+    case cv_type_2d_edge_rlcubic30: return "EdgeRevLin03Cubic2D";
     default: break;
     }
     return "Unknown";
@@ -262,6 +283,9 @@ static uint cv_new_node(cv_manifold *ctx, int type, int offset)
     case cv_type_2d_edge_linear:
     case cv_type_2d_edge_cubic:
     case cv_type_2d_edge_conic:
+    case cv_type_2d_edge_rlinear:
+    case cv_type_2d_edge_rcubic:
+    case cv_type_2d_edge_rconic:
         if (ctx->edge < idx) {
             cv_node_set_next(cv_node_array_item(ctx, ctx->edge), idx);
         }
@@ -275,8 +299,24 @@ static uint cv_new_node(cv_manifold *ctx, int type, int offset)
             ctx->contour_min.y = cv_min(ctx->contour_min.y, p->v.y);
             ctx->contour_max.x = cv_max(ctx->contour_max.x, p->v.x);
             ctx->contour_max.y = cv_max(ctx->contour_max.y, p->v.y);
-            if (i == 0) p1 = p;
-            if (i == pc-1) p2 = p;
+            switch (type) {
+            case cv_type_2d_edge_linear:
+            case cv_type_2d_edge_cubic:
+            case cv_type_2d_edge_conic:
+            case cv_type_2d_edge_lconic02:
+            case cv_type_2d_edge_lcubic03:
+                if (i == 0) p1 = p;
+                if (i == pc-1) p2 = p;
+                break;
+            case cv_type_2d_edge_rlinear:
+            case cv_type_2d_edge_rcubic:
+            case cv_type_2d_edge_rconic:
+            case cv_type_2d_edge_rlconic20:
+            case cv_type_2d_edge_rlcubic30:
+                if (i == pc-1) p1 = p;
+                if (i == 0) p2 = p;
+                break;
+            }
         }
         ctx->contour_area += (p1->v.x * p2->v.y - p2->v.x * p1->v.y) / 2.f;
 
@@ -435,7 +475,7 @@ static void cv_dump_stats(cv_manifold *ctx)
         "", "glyphs",   "nodes",    "points");
     cv_info("stats: %8s %8s %8s %8s\n",
         "", "--------",   "--------", "--------");
-    cv_info("stats: %8s %8zu %8zu %8zu\n",
+    cv_info("stats: %8s %8u %8u %8u\n",
         "count",
         array_buffer_count(&ctx->glyphs),
         array_buffer_count(&ctx->nodes),
@@ -466,6 +506,13 @@ static int cv_hull_count_edges(cv_manifold *ctx, uint idx, uint end, uint depth,
     case cv_type_2d_edge_linear:
     case cv_type_2d_edge_conic:
     case cv_type_2d_edge_cubic:
+    case cv_type_2d_edge_lconic02:
+    case cv_type_2d_edge_lcubic03:
+    case cv_type_2d_edge_rlinear:
+    case cv_type_2d_edge_rconic:
+    case cv_type_2d_edge_rcubic:
+    case cv_type_2d_edge_rlconic20:
+    case cv_type_2d_edge_rlcubic30:
         ctx->edge_count++;
         break;
     }
@@ -1206,6 +1253,93 @@ static void cv_linear_bounding_hull(cv_manifold *mb,
         }
     }
     if (m) *m = npoints;
+}
+
+static void cv_linear_bounding_manifold(cv_manifold *mb,
+                                        uint idx, uint end,
+                                        cv_hull_bound bound)
+{
+    vec2f v1, v2, v3, a, b, c, l = { 0.f };
+    float xla, dla, la, xlb, dlb, lb, xbc, dbc, bc;
+
+    cv_node *node = cv_node_array_item(mb, idx);
+    uint next = cv_node_next(node);
+    uint edge_idx = idx + 1, edge_end = next ? next : end;
+    uint n = edge_idx < edge_end ? edge_end - edge_idx : 0;
+    int w;
+
+    switch(cv_node_attr(node)) {
+    case cv_contour_cw: w = -1; break;
+    case cv_contour_ccw: w = 1; break;
+    default: w = 0; break;
+    }
+
+    uint p;
+    for (uint i = n-1; i < n+n; i++) {
+        uint pc = cv_edge_point_count(mb, edge_idx + i%n);
+        cv_node *edge_node = cv_node_array_item(mb, edge_idx + i%n);
+        switch (pc) {
+        case 2:
+            p = cv_node_offset(cv_node_array_item(mb, edge_idx + i%n));
+            v1 =  cv_point_get(mb, p + 0);
+            v2 =  cv_point_get(mb, p + 1);
+            a = (vec2f) { v2.x - v1.x, v2.y - v1.y };
+            xla = vec2f_cross(l, a), dla = vec2f_dot(l, a), la = atan2f(xla, dla);
+
+            if (i != n-1)
+            {
+                cv_new_node(mb, cv_type_2d_edge_linear, p);
+            }
+
+            l = a;
+            break;
+        case 3:
+            p = cv_node_offset(cv_node_array_item(mb, edge_idx + i%n));
+            v1 =  cv_point_get(mb, p + 0);
+            v2 =  cv_point_get(mb, p + 1);
+            v3 =  cv_point_get(mb, p + 2);
+            a = (vec2f) { v2.x - v1.x, v2.y - v1.y };
+            b = (vec2f) { v3.x - v1.x, v3.y - v1.y };
+            c = (vec2f) { v3.x - v2.x, v3.y - v2.y };
+            xla = vec2f_cross(l, a), dla = vec2f_dot(l, a), la = atan2f(xla, dla);
+            xlb = vec2f_cross(l, b), dlb = vec2f_dot(l, b), lb = atan2f(xlb, dlb);
+            xbc = vec2f_cross(l, b), dbc = vec2f_dot(l, b), bc = atan2f(xlb, dlb);
+
+            if (i != n-1)
+            {
+                int cond;
+                switch (bound) {
+                case cv_hull_interior: cond = la > lb; break;
+                case cv_hull_exterior: cond = la < lb; break;
+                }
+                if (cond) {
+                    //p + 0;
+                    //p + 1;
+                    cv_new_node(mb, cv_type_2d_edge_linear, p);
+                    cv_new_node(mb, cv_type_2d_edge_linear, p);
+                    l = c;
+                } else {
+                    //p;
+                    cv_new_node(mb, cv_type_2d_edge_linear, p);
+
+                    l = b;
+                }
+            } else {
+                int cond;
+                switch (bound) {
+                case cv_hull_interior: cond = bc > 0; break;
+                case cv_hull_exterior: cond = bc < 0; break;
+                }
+                if (cond) {
+                    l = c;
+                } else {
+                    l = b;
+                }
+            }
+
+            break;
+        }
+    }
 }
 
 static void cv_point_list_moduli(uint *pl, uint *mpl, uint *m,
