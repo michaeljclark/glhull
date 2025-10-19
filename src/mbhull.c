@@ -7,6 +7,7 @@
 #include <alloca.h>
 #include <float.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/stat.h>
 
 #define _USE_MATH_DEFINES
@@ -21,7 +22,7 @@
 #include FT_OUTLINE_H
 
 #include "linmath.h"
-#include "gl2_util.h"
+#include "gl2_nano.h"
 #include "cv_model.h"
 
 static const char* curves_shader_glsl = "shaders/curves.comp";

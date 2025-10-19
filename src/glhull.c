@@ -7,6 +7,7 @@
 #include <alloca.h>
 #include <float.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/stat.h>
 
 #define _USE_MATH_DEFINES
@@ -33,7 +34,7 @@
 #include "fpng_c.h"
 
 #include "linmath.h"
-#include "gl2_util.h"
+#include "gl2_nano.h"
 #include "cv_model.h"
 
 typedef unsigned char uchar;
@@ -219,62 +220,86 @@ static void hull_traverse_nodes(hull_state *state, vec2f o, float s,
 {
     NVGcontext* vg = state->vg;
     cv_manifold* cv = state->mb;
+    cv_point *p[4];
     while (idx < end) {
         cv_node *node = cv_node_array_item(cv, idx);
         uint next = cv_node_next(node);
         uint type = cv_node_type(node);
         uint offset = cv_node_offset(node);
+        uint pc = cv_point_count(type);
         switch (type) {
-            case cv_type_2d_edge_linear:
-            case cv_type_2d_edge_conic:
-            case cv_type_2d_edge_cubic: {
-                if (state->point == -1) {
-                    cv_point *p0 = cv_point_array_item(cv, offset + 0);
-                    cv_draw_move_to(vg, hull_x(o, s, p0), hull_y(o, s, p0));
-                    state->point = idx;
-                }
+        case cv_type_2d_shape: {
+            if (state->shape != -1) {
+                cv_draw_fill(vg);
             }
+            state->shape = idx;
+            state->contour = -1;
+            cv_draw_begin_path(vg);
+            break;
         }
-        switch (type) {
-            case cv_type_2d_shape: {
-                if (state->shape != -1) {
-                    cv_draw_fill(vg);
-                }
-                state->shape = idx;
-                state->contour = -1;
-                cv_draw_begin_path(vg);
+        case cv_type_2d_contour: {
+            if (state->contour != -1) {
+                hull_path_winding(state);
+                cv_draw_close_path(vg);
+            }
+            state->contour = idx;
+            state->point = -1;
+            break;
+        }
+        case cv_type_2d_edge_linear:
+        case cv_type_2d_edge_conic:
+        case cv_type_2d_edge_cubic:
+        case cv_type_2d_edge_lconic02:
+        case cv_type_2d_edge_lcubic03:
+        case cv_type_2d_edge_rlinear:
+        case cv_type_2d_edge_rconic:
+        case cv_type_2d_edge_rcubic:
+        case cv_type_2d_edge_rlconic20:
+        case cv_type_2d_edge_rlcubic30:
+            int rev = 0;
+            switch (type) {
+            case cv_type_2d_edge_rlinear:
+            case cv_type_2d_edge_rconic:
+            case cv_type_2d_edge_rcubic:
+            case cv_type_2d_edge_rlconic20:
+            case cv_type_2d_edge_rlcubic30:
+                rev = 1;
                 break;
             }
-            case cv_type_2d_contour: {
-                if (state->contour != -1) {
-                    hull_path_winding(state);
-                    cv_draw_close_path(vg);
-                }
-                state->contour = idx;
-                state->point = -1;
+            if (state->point == -1) {
+                p[0] = cv_point_array_item(cv, offset + (rev ? pc-1 : 0));
+                cv_draw_move_to(vg, hull_x(o, s, p[0]), hull_y(o, s, p[0]));
+                state->point = idx;
+            }
+            for (int i = 1; i < pc; i++) {
+                p[i] = cv_point_array_item(cv, offset + (rev ? pc-1-i : i));
+            }
+            switch (type) {
+            case cv_type_2d_edge_linear:
+            case cv_type_2d_edge_rlinear:
+                cv_draw_line_to(vg, hull_x(o, s, p[1]), hull_y(o, s, p[1]));
+                break;
+            case cv_type_2d_edge_conic:
+            case cv_type_2d_edge_rconic:
+                cv_draw_quadratic_to(vg, hull_x(o, s, p[1]), hull_y(o, s, p[1]),
+                                         hull_x(o, s, p[2]), hull_y(o, s, p[2]));
+                break;
+            case cv_type_2d_edge_cubic:
+            case cv_type_2d_edge_rcubic:
+                cv_draw_bezier_to(vg, hull_x(o, s, p[1]), hull_y(o, s, p[1]),
+                                      hull_x(o, s, p[2]), hull_y(o, s, p[2]),
+                                      hull_x(o, s, p[3]), hull_y(o, s, p[3]));
+                break;
+            case cv_type_2d_edge_lconic02:
+            case cv_type_2d_edge_rlconic20:
+                cv_draw_line_to(vg, hull_x(o, s, p[1]), hull_y(o, s, p[2]));
+                break;
+            case cv_type_2d_edge_lcubic03:
+            case cv_type_2d_edge_rlcubic30:
+                cv_draw_line_to(vg, hull_x(o, s, p[1]), hull_y(o, s, p[3]));
                 break;
             }
-            case cv_type_2d_edge_linear: {
-                cv_point *p1 = cv_point_array_item(cv, offset + 1);
-                cv_draw_line_to(vg, hull_x(o, s, p1), hull_y(o, s, p1));
-                break;
-            }
-            case cv_type_2d_edge_conic: {
-                cv_point *p1 = cv_point_array_item(cv, offset + 1);
-                cv_point *p2 = cv_point_array_item(cv, offset + 2);
-                cv_draw_quadratic_to(vg, hull_x(o, s, p1), hull_y(o, s, p1),
-                                    hull_x(o, s, p2), hull_y(o, s, p2));
-                break;
-            }
-            case cv_type_2d_edge_cubic: {
-                cv_point *p1 = cv_point_array_item(cv, offset + 1);
-                cv_point *p2 = cv_point_array_item(cv, offset + 2);
-                cv_point *p3 = cv_point_array_item(cv, offset + 3);
-                cv_draw_bezier_to(vg, hull_x(o, s, p1), hull_y(o, s, p1),
-                                 hull_x(o, s, p2), hull_y(o, s, p2),
-                                 hull_x(o, s, p3), hull_y(o, s, p3));
-                break;
-            }
+            break;
         }
         uint new_end = next ? next : end;
         if (idx + 1 < new_end) {
