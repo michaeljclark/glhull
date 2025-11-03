@@ -949,9 +949,9 @@ static int cv_hull_skip_contour(cv_manifold* mb, uint *pl, int n,
 }
 
 /*
- * béziergon convex interior hulls
+ * convex tessellation of béziergon interior and exterior hulls.
  *
- * algorithm to split beziergon contours into convex interior hulls.
+ * algorithm to split beziergon contour hulls into convex partitions.
  *
  * start at some edge and walk around the contour testing the cross product
  * of each edge against a closure of subsequent edge vectors to choose a
@@ -974,8 +974,9 @@ static int cv_hull_skip_contour(cv_manifold* mb, uint *pl, int n,
  * if a subsequent point on the contour is inside the hull, the hull is
  * shrunk by backing up to the last edge that no longer contains that point.
  *
- * work in progress. code presently only finds the first convex section.
- * and does not yet take into consideration the control points.
+ * work in progress.
+ *
+ * - interpenetration degeneracies require backtracking and splits.
  */
 
 static int opt_tracing = 0;
