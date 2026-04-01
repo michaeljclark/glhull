@@ -1,6 +1,6 @@
 # glhull
 
-_glhull_ is an experiment to render béziergon convex interior hulls.
+_glhull_ is an experiment to render a béziergon convex decomposition.
 
 - loading truetype glyphs into manifold buffers using FreeType.
 - division of béziergons into interior and exterior hulls.
